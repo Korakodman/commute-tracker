@@ -5,6 +5,18 @@ import { TravelDaySchema } from "@/schemas/TravelDaySchema";
 import { NextResponse } from "next/server";
 import Month from "@/app/Models/Month";
 
+ function isValidDateString(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+
+  const testDate = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    testDate.getUTCFullYear() === year &&
+    testDate.getUTCMonth() === month - 1 &&
+    testDate.getUTCDate() === day
+  );
+}
+   
 
 export async function POST(req: Request) {
   await connectDB();
@@ -47,6 +59,28 @@ export async function POST(req: Request) {
       { status: 404 }
     );
   }
+
+const [year, monthNumber] = date.split("-").map(Number);
+
+if (year !== month.year || monthNumber !== month.month) {
+  return NextResponse.json(
+    {
+      message: "วันที่ไม่ตรงกับเดือนที่ระบุ",
+    },
+    { status: 400 }
+  );
+}
+
+
+  
+if (!isValidDateString(date)) {
+  return NextResponse.json(
+    {
+      message: "วันที่ไม่ถูกต้อง",
+    },
+    { status: 400 }
+  );
+}
 
   // 4. สร้าง TravelDay
   try {
