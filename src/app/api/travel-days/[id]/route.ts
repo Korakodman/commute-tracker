@@ -166,3 +166,23 @@ export async function PATCH(
     );
   }
 }
+export async function DELETE(req:Request,{params}:{params: Promise<{id:string}>}) {
+      
+   await connectDB()
+
+  const {id} = await params
+
+  if(!mongoose.isValidObjectId(id)){
+    return NextResponse.json({message:"ID ไม่ถูกต้อง"},{status:400})
+  }
+
+  const deletedTravelDay = await TravelDay.findByIdAndDelete(id)
+
+  if(!deletedTravelDay){
+    return NextResponse.json({message:"ไม่พบข้อมูลที่ต้องการลบ"},{status:404})
+  }
+
+  return NextResponse.json({message:"ลบวันที่",TravelDay:deletedTravelDay},{status:200})
+
+
+}
