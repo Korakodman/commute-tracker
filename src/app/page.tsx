@@ -1,4 +1,13 @@
 import Image from "next/image";
+import { generateMonthDays } from "@/lib/calender";
+
+console.log(generateMonthDays(
+  2026,
+  9,
+  [1, 2, 3, 4, 5],
+  ["2026-09-14"],
+  134
+));
 
 export default function Home() {
   return (
