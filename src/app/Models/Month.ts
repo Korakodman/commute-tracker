@@ -5,7 +5,9 @@ const {Schema} = mongoose
 interface Month{
     year:number,
     month:number,
-    defaultDailyCost:number
+    defaultDailyCost:number,
+    workDays:number[],
+    offDates:string[]
 }
 
 const MonthSchema = new Schema<Month>({
@@ -23,6 +25,16 @@ const MonthSchema = new Schema<Month>({
         type:Number,
         required:true,
         min:0,
+    },
+    workDays:{
+        type:[Number],
+        required:true,
+        default:()=>[1,2,3,4,5],
+    },
+    offDates:{
+        type:[String],
+        required:true,
+        default:()=>[],
     }
 })
 
