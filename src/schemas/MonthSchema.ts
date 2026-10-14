@@ -26,11 +26,23 @@ const offDatesSchema = z.array(
   )
 );
 
+// ใช้ตอนสร้างเดือน
 export const MonthSchema = z.object({
   year: yearSchema,
   month: monthNumberSchema,
   defaultDailyCost: dailyCostSchema,
-
   workDays: workDaysSchema.default([1, 2, 3, 4, 5]),
   offDates: offDatesSchema.default([]),
 });
+
+// ใช้ตอนแก้การตั้งค่าของเดือนที่มีอยู่แล้ว
+export const UpdateMonthSchema = z
+  .object({
+    defaultDailyCost: dailyCostSchema.optional(),
+    workDays: workDaysSchema.optional(),
+    offDates: offDatesSchema.optional(),
+  })
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    "ต้องระบุข้อมูลอย่างน้อยหนึ่ง field"
+  );

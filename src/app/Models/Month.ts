@@ -29,7 +29,7 @@ const MonthSchema = new Schema<Month>({
     workDays:{
         type:[Number],
         required:true,
-        default:[1,2,3,4,5],
+        default:()=>[1,2,3,4,5],
         validate:{
             validator:(days:number[]) =>
                 days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6)
@@ -38,7 +38,7 @@ const MonthSchema = new Schema<Month>({
     offDates:{
         type:[String],
         required:true,
-        default:[]
+        default:()=>[],
     }
 })
 

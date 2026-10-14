@@ -4,59 +4,78 @@ import { NextResponse } from "next/server";
 
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
-
-import { GenerateMonthDaysSchema } from "@/schemas/GenerateMonthDaysSchema";
 import { generateMonthDays } from "@/lib/calender";
 
+function isValidDateString(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+
+  const testDate = new Date(
+    Date.UTC(year, month - 1, day)
+  );
+
+  return (
+    testDate.getUTCFullYear() === year &&
+    testDate.getUTCMonth() === month - 1 &&
+    testDate.getUTCDate() === day
+  );
+}
+
 export async function POST(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   await connectDB();
 
-  // 1. รับ Month ID
+  // 1. ตรวจสอบ Month ID
   const { id } = await params;
 
   if (!mongoose.isValidObjectId(id)) {
     return NextResponse.json(
-      {
-        message: "Month ID ไม่ถูกต้อง",
-      },
+      { message: "Month ID ไม่ถูกต้อง" },
       { status: 400 }
     );
   }
 
-  // 2. หา Month
+  // 2. ค้นหา Month
   const month = await Month.findById(id);
 
   if (!month) {
     return NextResponse.json(
-      {
-        message: "ไม่พบเดือนที่ระบุ",
-      },
+      { message: "ไม่พบเดือนที่ระบุ" },
       { status: 404 }
     );
   }
 
-  const body: unknown = await req.json();
-  const result = GenerateMonthDaysSchema.safeParse(body);
+  // 3. อ่านการตั้งค่าจาก MongoDB
+  const workDays = month.workDays ?? [1, 2, 3, 4, 5];
+  const offDates = month.offDates ?? [];
 
-  if (!result.success) {
+  // 4. ตรวจสอบวันหยุดพิเศษ
+  const invalidOffDate = offDates.find((date: string) => {
+    if (!isValidDateString(date)) {
+      return true;
+    }
+    const [year, monthNumber] = date.split("-").map(Number);
+
+    return (
+      year !== month.year ||
+      monthNumber !== month.month
+    );
+  });
+
+  if (invalidOffDate) {
     return NextResponse.json(
       {
-        message: "ข้อมูลไม่ถูกต้อง",
-        errors: result.error.flatten(),
+        message: "พบวันหยุดที่ไม่ถูกต้องหรือไม่ตรงกับเดือน",
+        invalidDate: invalidOffDate,
       },
       { status: 400 }
     );
   }
 
-  const { workDays, offDates } = result.data;
-
-
-  // 5. ตรวจว่าเดือนนี้มี TravelDay อยู่แล้วหรือยัง
+  // 5. ป้องกันการ Generate ซ้ำ
   const existingDays = await TravelDay.countDocuments({
-    monthId: id,
+    monthId: month._id,
   });
 
   if (existingDays > 0) {
@@ -69,26 +88,7 @@ export async function POST(
     );
   }
 
-  // 6. ตรวจ offDates ให้อยู่ในเดือนเดียวกัน
-  const monthString = `${month.year}-${String(
-    month.month
-  ).padStart(2, "0")}`;
-
-  const invalidOffDate = offDates.find(
-    (date) => !date.startsWith(`${monthString}-`)
-  );
-
-  if (invalidOffDate) {
-    return NextResponse.json(
-      {
-        message: "offDates มีวันที่ไม่ตรงกับเดือนที่กำหนด",
-        invalidDate: invalidOffDate,
-      },
-      { status: 400 }
-    );
-  }
-
-  // 7. สร้าง Calendar
+  // 6. สร้างวันทั้งหมดจากการตั้งค่าของ Month
   const calendarDays = generateMonthDays(
     month.year,
     month.month,
@@ -97,19 +97,18 @@ export async function POST(
     month.defaultDailyCost
   );
 
-  // 8. แปลงเป็นข้อมูลสำหรับ TravelDay
+  // 7. เตรียมข้อมูลสำหรับบันทึก
   const travelDays = calendarDays.map((day) => ({
-    monthId: new mongoose.Types.ObjectId(id),
+    monthId: month._id,
     date: day.date,
     status: day.status,
     cost: day.cost,
   }));
 
   try {
-    // 9. บันทึกทั้งหมดทีเดียว
-    const createdTravelDays = await TravelDay.insertMany(
-      travelDays
-    );
+    // 8. บันทึกวันทั้งหมด
+    const createdTravelDays =
+      await TravelDay.insertMany(travelDays);
 
     const workDayCount = createdTravelDays.filter(
       (day) => day.status === "WORK"
@@ -131,7 +130,6 @@ export async function POST(
         workDays: workDayCount,
         offDays: offDayCount,
         totalCost,
-        travelDays: createdTravelDays,
       },
       { status: 201 }
     );
@@ -143,17 +141,13 @@ export async function POST(
       error.code === 11000
     ) {
       return NextResponse.json(
-        {
-          message: "พบวันที่ซ้ำในปฏิทิน",
-        },
+        { message: "พบวันที่ซ้ำในปฏิทิน" },
         { status: 409 }
       );
     }
 
     return NextResponse.json(
-      {
-        message: "เกิดข้อผิดพลาดในการสร้างปฏิทิน",
-      },
+      { message: "เกิดข้อผิดพลาดในการสร้างปฏิทิน" },
       { status: 500 }
     );
   }
