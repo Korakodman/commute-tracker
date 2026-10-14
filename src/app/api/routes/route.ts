@@ -10,9 +10,16 @@ export async function POST(req:Request) {
 
    const result = TravelRouteSchema.safeParse(body)
 
-   console.log(result)
+   if(!result.success){
+      return NextResponse.json(
+         {
+            message:"ข้อมูลไม่ถูกต้อง",
+            errors:result.error.flatten()
+         },
+         {status:400}
+      )
+   }
 
-    
   const newTravelRoute = await TravelRoute.create(result.data)
 
   

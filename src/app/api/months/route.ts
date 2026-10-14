@@ -18,15 +18,25 @@ export async function POST(req:Request) {
 
     const body:unknown = await req.json()
 
-    const result = MonthSchema.safeParse(body)
+   const result = MonthSchema.safeParse(body)
 
-    if(!result.success){
-        return NextResponse.json({message:"ข้อมูลไม่ถูกต้อง",errors:result.error.flatten()},{status:400})
-    }
-  
-   const NewMonth = await Month.create(result.data)
+if(!result.success){
+    return NextResponse.json(
+        {
+            message:"ข้อมูลไม่ถูกต้อง",
+            errors:result.error.flatten()
+        },
+        {status:400}
+    )
+}
 
-   return NextResponse.json({NewMonth},{status:201})
+console.log("ZOD RESULT:", result.data)
+
+const NewMonth = await Month.create(result.data)
+
+console.log("CREATED MONTH:", NewMonth)
+
+return NextResponse.json({NewMonth},{status:201})
 
 
 }

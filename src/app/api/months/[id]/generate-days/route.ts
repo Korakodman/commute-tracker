@@ -38,10 +38,7 @@ export async function POST(
     );
   }
 
-  // 3. รับ body
   const body: unknown = await req.json();
-
-  // 4. Validate body
   const result = GenerateMonthDaysSchema.safeParse(body);
 
   if (!result.success) {
@@ -55,6 +52,7 @@ export async function POST(
   }
 
   const { workDays, offDates } = result.data;
+
 
   // 5. ตรวจว่าเดือนนี้มี TravelDay อยู่แล้วหรือยัง
   const existingDays = await TravelDay.countDocuments({

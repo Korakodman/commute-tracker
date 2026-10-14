@@ -1,71 +1,897 @@
-import Image from "next/image";
-import { generateMonthDays } from "@/lib/calender";
+"use client";
 
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+
+import {
+  CalendarDays,
+  RefreshCw,
+  Wallet,
+  BriefcaseBusiness,
+  Coffee,
+  Plus,
+  X,
+} from "lucide-react";
+interface MonthItem {
+  _id: string;
+  year: number;
+  month: number;
+  defaultDailyCost: number;
+  workDays?: number[];
+  offDates?: string[];
+}
+
+interface TravelDay {
+  _id: string;
+  monthId: string;
+  date: string;
+  status: "WORK" | "OFF";
+  cost: number;
+  note?: string;
+}
+
+interface MonthDetail {
+  month: MonthItem;
+  travelDays: TravelDay[];
+  summary: {
+    totalDays: number;
+    workDays: number;
+    offDays: number;
+    totalCost: number;
+  };
+}
+
+const weekdayLabels = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("th-TH", {
+    style: "currency",
+    currency: "THB",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatMonth(year: number, month: number) {
+  return new Intl.DateTimeFormat("th-TH", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+const workDayOptions = [
+  { value: 0, label: "อาทิตย์" },
+  { value: 1, label: "จันทร์" },
+  { value: 2, label: "อังคาร" },
+  { value: 3, label: "พุธ" },
+  { value: 4, label: "พฤหัสบดี" },
+  { value: 5, label: "ศุกร์" },
+  { value: 6, label: "เสาร์" },
+];
 
 export default function Home() {
+  const [months, setMonths] = useState<MonthItem[]>([]);
+  const [selectedMonthId, setSelectedMonthId] = useState("");
+  const [data, setData] = useState<MonthDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const [monthsReloadKey, setMonthsReloadKey] = useState(0);
+
+const [showCreateForm, setShowCreateForm] = useState(false);
+const [isCreatingMonth, setIsCreatingMonth] = useState(false);
+
+const [createError, setCreateError] = useState("");
+const [createSuccess, setCreateSuccess] = useState("");
+
+const [createYear, setCreateYear] = useState(
+  new Date().getFullYear()
+);
+const [createMonth, setCreateMonth] = useState(
+  new Date().getMonth() + 1
+);
+const [createDailyCost, setCreateDailyCost] = useState(134);
+
+const [createWorkDays, setCreateWorkDays] = useState<number[]>([
+  1, 2, 3, 4, 5,
+]);
+
+const [createOffDates, setCreateOffDates] = useState<string[]>([]);
+const [offDateInput, setOffDateInput] = useState("");
+
+
+
+  // โหลดรายการเดือน
+  useEffect(() => {
+    let active = true;
+
+    async function loadMonths() {
+      try {
+        const response = await fetch("/api/months");
+
+        if (!response.ok) {
+          throw new Error("โหลดรายการเดือนไม่สำเร็จ");
+        }
+
+        const body: { MonthAll: MonthItem[] } =
+          await response.json();
+
+        const sortedMonths = [...body.MonthAll].sort(
+          (a, b) =>
+            b.year - a.year || b.month - a.month
+        );
+
+        if (!active) return;
+
+        setMonths(sortedMonths);
+
+        if (sortedMonths.length > 0) {
+          setSelectedMonthId((currentId) => {
+            if (
+              currentId &&
+              sortedMonths.some((item) => item._id === currentId)
+            ) {
+              return currentId;
+            }
+
+            return sortedMonths[0]._id;
+          });
+        }
+      } catch (err) {
+        if (active) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "เกิดข้อผิดพลาด"
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadMonths();
+
+    return () => {
+      active = false;
+    };
+  }, [monthsReloadKey]);
+
+  // โหลดรายละเอียดเดือนที่เลือก
+  useEffect(() => {
+    if (!selectedMonthId) return;
+
+    let active = true;
+
+    async function loadMonth() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const response = await fetch(
+          `/api/months/${selectedMonthId}`
+        );
+
+        if (!response.ok) {
+          throw new Error("โหลดข้อมูลปฏิทินไม่สำเร็จ");
+        }
+
+        const result: MonthDetail = await response.json();
+
+        if (active) setData(result);
+      } catch (err) {
+        if (active) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "เกิดข้อผิดพลาด"
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadMonth();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedMonthId, reloadKey]);
+
+  // แปลงข้อมูล TravelDay เป็นช่องปฏิทิน
+  const calendarCells = useMemo(() => {
+    if (!data) return [];
+
+    const { year, month } = data.month;
+
+    // จัดปฏิทินให้เริ่มต้นวันจันทร์
+    const firstWeekday = new Date(
+      Date.UTC(year, month - 1, 1)
+    ).getUTCDay();
+
+    const leadingBlanks = (firstWeekday + 6) % 7;
+
+    const daysInMonth = new Date(
+      Date.UTC(year, month, 0)
+    ).getUTCDate();
+
+    const daysByDate = new Map(
+      data.travelDays.map((day) => [day.date, day])
+    );
+
+    const cells: (
+      | {
+          dayNumber: number;
+          date: string;
+          record?: TravelDay;
+        }
+      | null
+    )[] = Array.from(
+      { length: leadingBlanks },
+      () => null
+    );
+
+    for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber++) {
+      const date =
+        `${year}-${String(month).padStart(2, "0")}-` +
+        String(dayNumber).padStart(2, "0");
+
+      cells.push({
+        dayNumber,
+        date,
+        record: daysByDate.get(date),
+      });
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    return cells;
+  }, [data]);
+
+  const selectedMonth = data?.month;
+
+  function addOffDate() {
+  setCreateError("");
+
+  if (!offDateInput) {
+    setCreateError("กรุณาเลือกวันที่ต้องการหยุด");
+    return;
+  }
+
+  const monthPrefix =
+    `${createYear}-${String(createMonth).padStart(2, "0")}-`;
+
+  if (!offDateInput.startsWith(monthPrefix)) {
+    setCreateError("วันหยุดต้องอยู่ในเดือนที่เลือก");
+    return;
+  }
+
+  if (createOffDates.includes(offDateInput)) {
+    setCreateError("วันที่นี้ถูกเพิ่มไปแล้ว");
+    return;
+  }
+
+  setCreateOffDates((current) =>
+    [...current, offDateInput].sort()
+  );
+
+  setOffDateInput("");
+}
+
+async function handleCreateMonth(
+  event: FormEvent<HTMLFormElement>
+) {
+  event.preventDefault();
+
+  setCreateError("");
+  setCreateSuccess("");
+
+  const monthPrefix =
+    `${createYear}-${String(createMonth).padStart(2, "0")}-`;
+
+  if (createOffDates.some((date) => !date.startsWith(monthPrefix))) {
+    setCreateError(
+      "มีวันหยุดจากเดือนอื่น กรุณาลบออกก่อนสร้างเดือน"
+    );
+    return;
+  }
+
+  setIsCreatingMonth(true);
+
+  try {
+    const response = await fetch("/api/months", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        year: Number(createYear),
+        month: Number(createMonth),
+        defaultDailyCost: Number(createDailyCost),
+        workDays: createWorkDays,
+        offDates: createOffDates,
+      }),
+    });
+
+    const payload: {
+      NewMonth?: MonthItem;
+      month?: MonthItem;
+      message?: string;
+    } = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 409) {
+        throw new Error("เดือนนี้มีอยู่แล้ว");
+      }
+
+      throw new Error(
+        payload.message ?? "สร้างเดือนไม่สำเร็จ"
+      );
+    }
+
+    const createdMonth = payload.NewMonth ?? payload.month;
+
+    if (!createdMonth?._id) {
+      throw new Error(
+        "ไม่พบข้อมูลเดือนที่สร้างใน API response"
+      );
+    }
+
+    const generateResponse = await fetch(
+      `/api/months/${createdMonth._id}/generate-days`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workDays: createWorkDays,
+          offDates: createOffDates,
+        }),
+      }
+    );
+
+    const generatePayload: { message?: string } =
+      await generateResponse.json();
+
+    if (!generateResponse.ok) {
+      throw new Error(
+        generatePayload.message ?? "สร้างปฏิทินไม่สำเร็จ"
+      );
+    }
+
+    setSelectedMonthId(createdMonth._id);
+    setMonthsReloadKey((current) => current + 1);
+
+    setShowCreateForm(false);
+    setCreateSuccess("สร้างเดือนสำเร็จ!");
+    setCreateOffDates([]);
+    setOffDateInput("");
+  } catch (err) {
+    setCreateError(
+      err instanceof Error ? err.message : "เกิดข้อผิดพลาด"
+    );
+  } finally {
+    setIsCreatingMonth(false);
+  }
+}
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="min-h-screen bg-[#0C0C12] px-4 py-6 text-zinc-100 sm:px-8 sm:py-8">
+      <div className="mx-auto max-w-7xl space-y-8">
+        {/* Header */}
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-pink-500 text-white shadow-lg shadow-pink-950/40">
+              <CalendarDays size={23} />
+            </div>
+
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">
+                Commute Tracker
+              </h1>
+              <p className="text-xs tracking-[0.2em] text-zinc-500">
+                PERSONAL FINANCE
+              </p>
+            </div>
+          </div>
+
+        <div>
+          <div className="flex flex-wrap gap-2">
+  <button
+    type="button"
+    onClick={() => {
+      setShowCreateForm((current) => !current);
+      setCreateError("");
+    }}
+    className="flex items-center gap-2 rounded-xl bg-pink-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-pink-400"
+  >
+    <Plus size={16} />
+    สร้างเดือนใหม่
+  </button>
+
+  <button
+    type="button"
+    onClick={() => {
+      setMonthsReloadKey((current) => current + 1);
+      setReloadKey((current) => current + 1);
+    }}
+    disabled={loading}
+    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+  >
+    <RefreshCw size={16} />
+    รีเฟรชข้อมูล
+  </button>
+</div>
+          </div>
+        </header>
+
+        {/* Title and month selector */}
+        <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <p className="mb-2 text-sm text-pink-400">
+              MONTHLY OVERVIEW
+            </p>
+            <h2 className="text-3xl font-bold sm:text-4xl">
+              ปฏิทินค่าเดินทาง
+            </h2>
+            <p className="mt-2 text-sm text-zinc-500">
+              ดูวันทำงาน วันหยุด และค่าใช้จ่ายของแต่ละเดือน
+            </p>
+          </div>
+
+          <select
+            value={selectedMonthId}
+            onChange={(event) =>
+              setSelectedMonthId(event.target.value)
+            }
+            disabled={months.length === 0}
+            className="min-w-56 rounded-xl border border-white/10 bg-[#181820] px-4 py-3 text-sm text-white outline-none transition focus:border-pink-500"
+          >
+            {months.length === 0 && (
+              <option value="">ยังไม่มีเดือน</option>
+            )}
+
+            {months.map((item) => (
+              <option key={item._id} value={item._id}>
+                {formatMonth(item.year, item.month)}
+              </option>
+            ))}
+          </select>
+        </section>
+{createSuccess && (
+  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+    {createSuccess}
+  </div>
+)}
+
+{showCreateForm && (
+  <form
+    onSubmit={handleCreateMonth}
+    className="space-y-6 rounded-2xl border border-pink-500/20 bg-[#15151D] p-5 sm:p-6"
+  >
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <p className="text-sm font-semibold text-pink-400">
+          NEW MONTH
+        </p>
+        <h3 className="mt-1 text-xl font-bold text-white">
+          สร้างเดือนใหม่
+        </h3>
+        <p className="mt-1 text-sm text-zinc-500">
+          ตั้งค่าการเดินทางสำหรับเดือนนี้
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setShowCreateForm(false)}
+        className="rounded-lg p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+        aria-label="ปิดฟอร์ม"
+      >
+        <X size={18} />
+      </button>
+    </div>
+
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <label className="space-y-2 text-sm text-zinc-300">
+        ปี
+        <input
+          type="number"
+          min={2000}
+          required
+          value={createYear}
+          onChange={(event) =>
+            setCreateYear(Number(event.target.value))
+          }
+          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+      </label>
+
+      <label className="space-y-2 text-sm text-zinc-300">
+        เดือน
+        <select
+          value={createMonth}
+          onChange={(event) =>
+            setCreateMonth(Number(event.target.value))
+          }
+          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+        >
+          {Array.from({ length: 12 }, (_, index) => index + 1).map(
+            (monthNumber) => (
+              <option key={monthNumber} value={monthNumber}>
+                {new Intl.DateTimeFormat("th-TH", {
+                  month: "long",
+                  timeZone: "UTC",
+                }).format(
+                  new Date(Date.UTC(2026, monthNumber - 1, 1))
+                )}
+              </option>
+            )
+          )}
+        </select>
+      </label>
+
+      <label className="space-y-2 text-sm text-zinc-300">
+        ค่าเดินทางตั้งต้น (บาท/วัน)
+        <input
+          type="number"
+          min={0}
+          step="1"
+          required
+          value={createDailyCost}
+          onChange={(event) =>
+            setCreateDailyCost(Number(event.target.value))
+          }
+          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+        />
+      </label>
+    </div>
+
+    <div className="space-y-3">
+      <div>
+        <h4 className="font-semibold text-white">
+          วันทำงานประจำสัปดาห์
+        </h4>
+        <p className="mt-1 text-xs text-zinc-500">
+          เลือกวันทำงานของเดือนนี้
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {workDayOptions.map((day) => {
+          const checked = createWorkDays.includes(day.value);
+
+          return (
+            <label
+              key={day.value}
+              className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition ${
+                checked
+                  ? "border-pink-500/40 bg-pink-500/10 text-pink-200"
+                  : "border-white/10 bg-[#0C0C12] text-zinc-400 hover:border-white/20"
+              }`}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => {
+                  setCreateWorkDays((current) =>
+                    event.target.checked
+                      ? [...current, day.value].sort((a, b) => a - b)
+                      : current.filter((value) => value !== day.value)
+                  );
+                }}
+                className="accent-pink-500"
+              />
+              {day.label}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+
+    <div className="space-y-3">
+      <div>
+        <h4 className="font-semibold text-white">
+          วันหยุดพิเศษ
+        </h4>
+        <p className="mt-1 text-xs text-zinc-500">
+          วันที่เลือกจะเป็น OFF แม้ตรงกับวันทำงานประจำ
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="date"
+          value={offDateInput}
+          min={`${createYear}-${String(createMonth).padStart(2, "0")}-01`}
+          max={`${createYear}-${String(createMonth).padStart(2, "0")}-${String(
+            new Date(createYear, createMonth, 0).getDate()
+          ).padStart(2, "0")}`}
+          onChange={(event) => setOffDateInput(event.target.value)}
+          className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-sm text-white outline-none focus:border-pink-500"
+        />
+
+        <button
+          type="button"
+          onClick={addOffDate}
+          className="flex items-center justify-center gap-2 rounded-xl border border-pink-500/30 px-4 py-3 text-sm text-pink-300 transition hover:bg-pink-500/10"
+        >
+          <Plus size={16} />
+          เพิ่มวันหยุด
+        </button>
+      </div>
+
+      {createOffDates.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {createOffDates.map((date) => (
+            <span
+              key={date}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              {date}
+              <button
+                type="button"
+                onClick={() =>
+                  setCreateOffDates((current) =>
+                    current.filter((item) => item !== date)
+                  )
+                }
+                className="text-zinc-500 transition hover:text-pink-400"
+                aria-label={`ลบวันหยุด ${date}`}
+              >
+                <X size={14} />
+              </button>
+            </span>
+          ))}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      ) : (
+        <p className="text-xs text-zinc-500">
+          ยังไม่มีวันหยุดพิเศษ
+        </p>
+      )}
+    </div>
+
+    {createError && (
+      <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+        {createError}
+      </p>
+    )}
+
+    <div className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] pt-4">
+      <button
+        type="button"
+        onClick={() => setShowCreateForm(false)}
+        className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05]"
+      >
+        ยกเลิก
+      </button>
+
+      <button
+        type="submit"
+        disabled={isCreatingMonth}
+        className="flex items-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Plus size={16} />
+        {isCreatingMonth ? "กำลังสร้าง..." : "สร้างเดือน"}
+      </button>
+    </div>
+  </form>
+)}
+        {error && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
+        {loading && (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-zinc-400">
+            กำลังโหลดข้อมูล...
+          </div>
+        )}
+
+        {!loading && !error && !data && (
+          <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center">
+            <CalendarDays className="mx-auto mb-3 text-pink-400" size={34} />
+            <h3 className="font-semibold">ยังไม่มีข้อมูลเดือน</h3>
+            <p className="mt-2 text-sm text-zinc-500">
+              สร้างเดือนผ่าน API ก่อน แล้วเดือนจะแสดงตรงนี้
+            </p>
+          </div>
+        )}
+
+        {!loading && data && selectedMonth && (
+          <>
+            {/* Summary Cards */}
+            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-pink-500/20 bg-gradient-to-br from-pink-500/10 to-[#181820] p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-zinc-400">
+                    ค่าเดินทางรวม
+                  </p>
+                  <Wallet className="text-pink-400" size={20} />
+                </div>
+                <p className="mt-4 text-3xl font-bold text-pink-300">
+                  {formatMoney(data.summary.totalCost)}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500">
+                  ยอดรวมของเดือนที่เลือก
+                </p>
+              </div>
+
+              <SummaryCard
+                label="วันเดินทาง"
+                value={`${data.summary.workDays} วัน`}
+                detail="วันที่มีสถานะ WORK"
+                icon={<BriefcaseBusiness size={20} />}
+              />
+
+              <SummaryCard
+                label="วันหยุด"
+                value={`${data.summary.offDays} วัน`}
+                detail="วันที่มีสถานะ OFF"
+                icon={<Coffee size={20} />}
+              />
+
+              <SummaryCard
+                label="ค่าเดินทางต่อวัน"
+                value={formatMoney(selectedMonth.defaultDailyCost)}
+                detail="ค่าเริ่มต้นของเดือนนี้"
+                icon={<Wallet size={20} />}
+              />
+            </section>
+
+            {/* Calendar */}
+            <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#13131B]">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.07] px-5 py-5 sm:px-6">
+                <div>
+                  <h3 className="text-lg font-semibold">
+                    {formatMonth(
+                      selectedMonth.year,
+                      selectedMonth.month
+                    )}
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {data.summary.totalDays} วันในเดือนนี้
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs text-zinc-400">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-pink-400" />
+                    WORK
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-zinc-600" />
+                    OFF
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-7 border-b border-white/[0.07]">
+                {weekdayLabels.map((label) => (
+                  <div
+                    key={label}
+                    className="py-3 text-center text-xs font-medium text-zinc-500 sm:text-sm"
+                  >
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7">
+                {calendarCells.map((cell, index) => {
+                  if (!cell) {
+                    return (
+                      <div
+                        key={`blank-${index}`}
+                        className="min-h-20 border-b border-r border-white/[0.05] bg-black/10 sm:min-h-28"
+                      />
+                    );
+                  }
+
+                  const record = cell.record;
+                  const isWork = record?.status === "WORK";
+
+                  return (
+                    <div
+                      key={cell.date}
+                      className={`min-h-20 border-b border-r border-white/[0.05] p-1.5 transition sm:min-h-28 sm:p-3 ${
+                        isWork
+                          ? "bg-pink-500/[0.035] hover:bg-pink-500/[0.08]"
+                          : "hover:bg-white/[0.035]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-medium sm:text-sm ${
+                            isWork
+                              ? "bg-pink-500/15 text-pink-300"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {cell.dayNumber}
+                        </span>
+
+                        {record && (
+                          <span
+                            className={`hidden rounded-md px-1.5 py-1 text-[9px] font-semibold sm:inline-block ${
+                              isWork
+                                ? "bg-pink-500/10 text-pink-300"
+                                : "bg-zinc-700/40 text-zinc-400"
+                            }`}
+                          >
+                            {record.status}
+                          </span>
+                        )}
+                      </div>
+
+                      {record ? (
+                        <div className="mt-2 sm:mt-4">
+                          <p
+                            className={`text-[10px] font-medium sm:text-sm ${
+                              isWork
+                                ? "text-zinc-100"
+                                : "text-zinc-600"
+                            }`}
+                          >
+                            {formatMoney(record.cost)}
+                          </p>
+
+                          {record.note && (
+                            <p className="mt-1 hidden truncate text-xs text-zinc-500 sm:block">
+                              {record.note}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-[10px] text-zinc-600 sm:mt-4 sm:text-xs">
+                          ไม่มีข้อมูล
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <p className="text-center text-xs text-zinc-600">
+              เลือกเดือนด้านบนเพื่อดูปฏิทินและสรุปค่าเดินทางของเดือนอื่น
+            </p>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  detail,
+  icon,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-[#15151D] p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-400">{label}</p>
+        <span className="text-zinc-500">{icon}</span>
+      </div>
+      <p className="mt-4 text-2xl font-bold text-white">{value}</p>
+      <p className="mt-2 text-xs text-zinc-500">{detail}</p>
     </div>
   );
 }

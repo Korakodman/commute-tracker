@@ -7,7 +7,7 @@ interface CalenderDay {
 
 export function generateMonthDays(year:number,month:number,workDays:number[],offDates:string[],DefaultDailyCost:number):CalenderDay[] {
  
-     let dayInMonth = new Date(year,month , 0).getDate()
+     const dayInMonth = new Date(year,month , 0).getDate()
     const calenderDay:CalenderDay[] = []
 
     for(let day = 1; day <= dayInMonth;day++){

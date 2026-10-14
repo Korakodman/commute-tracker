@@ -73,7 +73,7 @@ export async function DELETE(req:Request,{params}:{params:Promise<{id:string}>})
    
   
 
-    const DeleteRoute = await TravelRoute.findByIdAndDelete(id)
+    await TravelRoute.findByIdAndDelete(id)
 
     return NextResponse.json({message:"ลบสำเร็จ"},{status:200})
 
