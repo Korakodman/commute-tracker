@@ -63,6 +63,18 @@ function formatMonth(year: number, month: number) {
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
+async function readJson<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 const workDayOptions = [
   { value: 0, label: "อาทิตย์" },
   { value: 1, label: "จันทร์" },
@@ -321,11 +333,11 @@ async function handleCreateMonth(
       }),
     });
 
-    const payload: {
+    const payload = await readJson<{
       NewMonth?: MonthItem;
       month?: MonthItem;
       message?: string;
-    } = await response.json();
+    }>(response);
 
     if (!response.ok) {
       if (response.status === 409) {
@@ -333,11 +345,11 @@ async function handleCreateMonth(
       }
 
       throw new Error(
-        payload.message ?? "สร้างเดือนไม่สำเร็จ"
+        payload?.message ?? "เซิร์ฟเวอร์ส่งข้อมูลไม่ถูกต้อง"
       );
     }
 
-    const createdMonth = payload.NewMonth ?? payload.month;
+    const createdMonth = payload?.NewMonth ?? payload?.month;
 
     if (!createdMonth?._id) {
       throw new Error(
@@ -359,12 +371,13 @@ async function handleCreateMonth(
       }
     );
 
-    const generatePayload: { message?: string } =
-      await generateResponse.json();
+    const generatePayload = await readJson<{ message?: string }>(
+      generateResponse
+    );
 
     if (!generateResponse.ok) {
       throw new Error(
-        generatePayload.message ?? "สร้างปฏิทินไม่สำเร็จ"
+        generatePayload?.message ?? "เซิร์ฟเวอร์ส่งข้อมูลไม่ถูกต้อง"
       );
     }
 

@@ -16,7 +16,16 @@ export async function GET() {
 export async function POST(req:Request) {
     await connectDB()
 
-    const body:unknown = await req.json()
+    let body: unknown;
+
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { message: "ข้อมูล JSON ไม่ถูกต้อง" },
+        { status: 400 }
+      );
+    }
 
    const result = MonthSchema.safeParse(body)
 
@@ -30,13 +39,28 @@ if(!result.success){
     )
 }
 
-console.log("ZOD RESULT:", result.data)
+try {
+  const NewMonth = await Month.create(result.data)
 
-const NewMonth = await Month.create(result.data)
+  return NextResponse.json({NewMonth},{status:201})
+} catch (error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === 11000
+  ) {
+    return NextResponse.json(
+      { message: "เดือนนี้มีอยู่แล้ว" },
+      { status: 409 }
+    );
+  }
 
-console.log("CREATED MONTH:", NewMonth)
-
-return NextResponse.json({NewMonth},{status:201})
+  return NextResponse.json(
+    { message: "เกิดข้อผิดพลาดในการสร้างเดือน" },
+    { status: 500 }
+  );
+}
 
 
 }
