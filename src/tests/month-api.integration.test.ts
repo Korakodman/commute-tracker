@@ -8,7 +8,7 @@ import {
   GET as getMonth,
   PATCH as updateMonth,
 } from "@/app/api/months/[id]/route";
-
+import { POST as generateDays } from "@/app/api/months/[id]/generate-days/route";
 const TEST_DB_URL =
   "mongodb://127.0.0.1:27017/commute-tracker-test";
 
