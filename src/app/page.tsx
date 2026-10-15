@@ -75,6 +75,21 @@ async function readJson<T>(response: Response): Promise<T | null> {
   }
 }
 
+async function fetchMonthDetail(monthId: string): Promise<MonthDetail> {
+  const response = await fetch(`/api/months/${monthId}`);
+  const payload = await readJson<MonthDetail & { message?: string }>(
+    response
+  );
+
+  if (!response.ok || !payload?.month) {
+    throw new Error(
+      payload?.message ?? "โหลดข้อมูลปฏิทินไม่สำเร็จ"
+    );
+  }
+
+  return payload;
+}
+
 const workDayOptions = [
   { value: 0, label: "อาทิตย์" },
   { value: 1, label: "จันทร์" },
@@ -88,6 +103,15 @@ const workDayOptions = [
 export default function Home() {
   const [months, setMonths] = useState<MonthItem[]>([]);
   const [selectedMonthId, setSelectedMonthId] = useState("");
+  const [selectedDay, setSelectedDay] = useState<TravelDay | null>(null);
+  const [isEditingDay, setIsEditingDay] = useState(false);
+  const [editStatus, setEditStatus] = useState<TravelDay["status"]>(
+    "WORK"
+  );
+  const [editCost, setEditCost] = useState(0);
+  const [isSavingDay, setIsSavingDay] = useState(false);
+  const [editDayError, setEditDayError] = useState("");
+  const [editDaySuccess, setEditDaySuccess] = useState("");
   const [data, setData] = useState<MonthDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -185,15 +209,7 @@ const [offDateInput, setOffDateInput] = useState("");
       setError("");
 
       try {
-        const response = await fetch(
-          `/api/months/${selectedMonthId}`
-        );
-
-        if (!response.ok) {
-          throw new Error("โหลดข้อมูลปฏิทินไม่สำเร็จ");
-        }
-
-        const result: MonthDetail = await response.json();
+        const result = await fetchMonthDetail(selectedMonthId);
 
         if (active) setData(result);
       } catch (err) {
@@ -269,6 +285,87 @@ const [offDateInput, setOffDateInput] = useState("");
   }, [data]);
 
   const selectedMonth = data?.month;
+
+  function handleSelectDay(record: TravelDay | undefined) {
+    setEditDayError("");
+    setEditDaySuccess("");
+    setIsEditingDay(false);
+
+    if (!record) {
+      setSelectedDay(null);
+      return;
+    }
+
+    setSelectedDay(record);
+    setEditStatus(record.status);
+    setEditCost(record.status === "OFF" ? 0 : record.cost);
+  }
+
+  async function handleSaveDay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedDay) return;
+
+    const nextCost = editStatus === "OFF" ? 0 : Number(editCost);
+
+    if (!Number.isFinite(nextCost) || nextCost < 0) {
+      setEditDayError("กรุณาระบุค่าเดินทางเป็นตัวเลขตั้งแต่ 0 ขึ้นไป");
+      return;
+    }
+
+    setIsSavingDay(true);
+    setEditDayError("");
+    setEditDaySuccess("");
+
+    try {
+      const response = await fetch(
+        `/api/travel-days/${selectedDay._id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status: editStatus,
+            cost: nextCost,
+          }),
+        }
+      );
+
+      const payload = await readJson<{
+        message?: string;
+        travelDay?: TravelDay;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.message ?? "บันทึกข้อมูลไม่สำเร็จ"
+        );
+      }
+
+      const refreshedData = await fetchMonthDetail(selectedMonthId);
+      const latestDay = refreshedData.travelDays.find(
+        (day) => day._id === selectedDay._id
+      );
+
+      if (!latestDay) {
+        throw new Error("ไม่พบข้อมูลวันที่อัปเดตแล้ว");
+      }
+
+      setData(refreshedData);
+      setSelectedDay(latestDay);
+      setEditStatus(latestDay.status);
+      setEditCost(latestDay.status === "OFF" ? 0 : latestDay.cost);
+      setIsEditingDay(false);
+      setEditDaySuccess("บันทึกสำเร็จ");
+    } catch (err) {
+      setEditDayError(
+        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการบันทึก"
+      );
+    } finally {
+      setIsSavingDay(false);
+    }
+  }
 
   function addOffDate() {
   setCreateError("");
@@ -382,6 +479,9 @@ async function handleCreateMonth(
     }
 
     setSelectedMonthId(createdMonth._id);
+    setSelectedDay(null);
+    setIsEditingDay(false);
+    setEditDaySuccess("");
     setMonthsReloadKey((current) => current + 1);
 
     setShowCreateForm(false);
@@ -434,6 +534,9 @@ async function handleCreateMonth(
   <button
     type="button"
     onClick={() => {
+      setSelectedDay(null);
+      setIsEditingDay(false);
+      setEditDaySuccess("");
       setMonthsReloadKey((current) => current + 1);
       setReloadKey((current) => current + 1);
     }}
@@ -463,9 +566,12 @@ async function handleCreateMonth(
 
           <select
             value={selectedMonthId}
-            onChange={(event) =>
-              setSelectedMonthId(event.target.value)
-            }
+            onChange={(event) => {
+              setSelectedDay(null);
+              setIsEditingDay(false);
+              setEditDaySuccess("");
+              setSelectedMonthId(event.target.value);
+            }}
             disabled={months.length === 0}
             className="min-w-56 rounded-xl border border-white/10 bg-[#181820] px-4 py-3 text-sm text-white outline-none transition focus:border-pink-500"
           >
@@ -816,11 +922,20 @@ async function handleCreateMonth(
 
                   return (
                     <div
+                      onClick={() => handleSelectDay(record)}
                       key={cell.date}
                       className={`min-h-20 border-b border-r border-white/[0.05] p-1.5 transition sm:min-h-28 sm:p-3 ${
                         isWork
                           ? "bg-pink-500/[0.035] hover:bg-pink-500/[0.08]"
                           : "hover:bg-white/[0.035]"
+                      } ${
+                        record
+                          ? "cursor-pointer"
+                          : "cursor-default"
+                      } ${
+                        selectedDay?._id === record?._id
+                          ? "ring-2 ring-inset ring-pink-400/70"
+                          : ""
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1">
@@ -875,6 +990,151 @@ async function handleCreateMonth(
                 })}
               </div>
             </section>
+
+            {selectedDay && (
+              <section className="rounded-2xl border border-pink-500/20 bg-[#15151D] p-5 shadow-lg shadow-pink-950/10 sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold tracking-[0.18em] text-pink-400">
+                      DAY DETAIL
+                    </p>
+                    <h3 className="mt-2 text-xl font-bold text-white">
+                      {selectedDay.date}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                        selectedDay.status === "WORK"
+                          ? "bg-pink-500/15 text-pink-300"
+                          : "bg-zinc-700/40 text-zinc-300"
+                      }`}
+                    >
+                      {selectedDay.status}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditStatus(selectedDay.status);
+                        setEditCost(
+                          selectedDay.status === "OFF"
+                            ? 0
+                            : selectedDay.cost
+                        );
+                        setEditDayError("");
+                        setEditDaySuccess("");
+                        setIsEditingDay(true);
+                      }}
+                      className="rounded-lg border border-pink-500/30 px-3 py-1.5 text-xs font-semibold text-pink-300 transition hover:bg-pink-500/10"
+                    >
+                      แก้ไข
+                    </button>
+                  </div>
+                </div>
+
+                {isEditingDay && (
+                  <form
+                    onSubmit={handleSaveDay}
+                    className="mt-5 space-y-4 rounded-xl border border-pink-500/20 bg-pink-500/[0.04] p-4"
+                  >
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-2 text-sm text-zinc-300">
+                        สถานะ
+                        <select
+                          value={editStatus}
+                          onChange={(event) => {
+                            const nextStatus = event.target.value as TravelDay["status"];
+                            setEditStatus(nextStatus);
+                            if (nextStatus === "OFF") {
+                              setEditCost(0);
+                            }
+                          }}
+                          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                        >
+                          <option value="WORK">WORK</option>
+                          <option value="OFF">OFF</option>
+                        </select>
+                      </label>
+
+                      <label className="space-y-2 text-sm text-zinc-300">
+                        ค่าเดินทาง
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={editStatus === "OFF" ? 0 : editCost}
+                          onChange={(event) =>
+                            setEditCost(Number(event.target.value))
+                          }
+                          disabled={editStatus === "OFF"}
+                          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </label>
+                    </div>
+
+                    {editDayError && (
+                      <p className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+                        {editDayError}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingDay(false);
+                          setEditDayError("");
+                        }}
+                        disabled={isSavingDay}
+                        className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:opacity-50"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSavingDay}
+                        className="rounded-lg bg-pink-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isSavingDay ? "กำลังบันทึก..." : "บันทึก"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {editDaySuccess && !isEditingDay && (
+                  <p className="mt-4 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+                    {editDaySuccess}
+                  </p>
+                )}
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                    <p className="text-xs text-zinc-500">สถานะ</p>
+                    <p className="mt-2 font-semibold text-white">
+                      {selectedDay.status === "WORK"
+                        ? "วันทำงาน"
+                        : "วันหยุด"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                    <p className="text-xs text-zinc-500">
+                      ค่าเดินทาง
+                    </p>
+                    {selectedDay.status === "WORK" ? (
+                      <p className="mt-2 text-lg font-semibold text-pink-300">
+                        {formatMoney(selectedDay.cost)}
+                      </p>
+                    ) : (
+                      <p className="mt-2 font-semibold text-zinc-400">
+                        ไม่มีค่าเดินทาง
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
             <p className="text-center text-xs text-zinc-600">
               เลือกเดือนด้านบนเพื่อดูปฏิทินและสรุปค่าเดินทางของเดือนอื่น
