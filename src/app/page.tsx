@@ -437,6 +437,20 @@ const [offDateInput, setOffDateInput] = useState("");
         );
       }
 
+      const regenerateResponse = await fetch(
+        `/api/months/${selectedMonthId}/regenerate-days`,
+        { method: "POST" }
+      );
+      const regeneratePayload = await readJson<{ message?: string }>(
+        regenerateResponse
+      );
+
+      if (!regenerateResponse.ok) {
+        throw new Error(
+          regeneratePayload?.message ?? "สร้างปฏิทินใหม่ไม่สำเร็จ"
+        );
+      }
+
       const refreshedData = await fetchMonthDetail(selectedMonthId);
 
       setData(refreshedData);
