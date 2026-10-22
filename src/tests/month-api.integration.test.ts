@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { beforeAll, afterAll, describe, expect, test } from "vitest";
+import { beforeAll, afterAll, describe, expect, test, vi } from "vitest";
 
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
@@ -9,11 +9,13 @@ import {
   PATCH as updateMonth,
 } from "@/app/api/months/[id]/route";
 import { POST as generateDays } from "@/app/api/months/[id]/generate-days/route";
+import { POST as regenerateDays } from "@/app/api/months/[id]/regenerate-days/route";
 const TEST_DB_URL =
   "mongodb://127.0.0.1:27017/commute-tracker-test";
 
 let testMonth: InstanceType<typeof Month>;
 let settingsMonth: InstanceType<typeof Month>;
+let regenerateMonth: InstanceType<typeof Month>;
 
 beforeAll(async () => {
   // ให้ integration test ใช้ DB แยกจาก DB ที่เราใช้พัฒนา
@@ -41,6 +43,14 @@ settingsMonth = await Month.create({
   workDays: [1, 2, 3, 4, 5],
   offDates: [],
 });
+
+regenerateMonth = await Month.create({
+  year: 2026,
+  month: 11,
+  defaultDailyCost: 100,
+  workDays: [1, 2, 3, 4, 5],
+  offDates: [],
+});
 });
 
 
@@ -61,6 +71,14 @@ await TravelDay.deleteMany({
 
 await Month.deleteOne({
   _id: settingsMonth._id,
+});
+
+await TravelDay.deleteMany({
+  monthId: regenerateMonth._id,
+});
+
+await Month.deleteOne({
+  _id: regenerateMonth._id,
 });
 
   await mongoose.connection.close();
@@ -262,3 +280,100 @@ expect(body.totalCost).toBe(2814);
 }
 
 );
+
+describe("Regenerate Month API Integration", () => {
+  test("ควร regenerate ตาม settings ใหม่ แทนที่วันเดิม และคำนวณ totalCost ใหม่", async () => {
+    await TravelDay.create([
+      {
+        monthId: regenerateMonth._id,
+        date: "legacy-1",
+        status: "WORK",
+        cost: 999,
+      },
+      {
+        monthId: regenerateMonth._id,
+        date: "legacy-2",
+        status: "OFF",
+        cost: 0,
+      },
+    ]);
+
+    await Month.updateOne(
+      { _id: regenerateMonth._id },
+      {
+        defaultDailyCost: 250,
+        workDays: [0],
+        offDates: ["2026-11-01"],
+      }
+    );
+
+    const response = await regenerateDays(
+      new Request(
+        `http://localhost/api/months/${regenerateMonth._id}/regenerate-days`,
+        { method: "POST" }
+      ),
+      {
+        params: Promise.resolve({ id: regenerateMonth._id.toString() }),
+      }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      message: "สร้างปฏิทินใหม่สำเร็จ",
+      totalDays: 30,
+      workDays: 4,
+      offDays: 26,
+      totalCost: 1000,
+    });
+    expect(body.travelDays).toHaveLength(30);
+
+    const savedDays = await TravelDay.find({
+      monthId: regenerateMonth._id,
+    }).sort({ date: 1 });
+
+    expect(savedDays).toHaveLength(30);
+    expect(savedDays.some((day) => day.date.startsWith("legacy-"))).toBe(false);
+    expect(savedDays.filter((day) => day.status === "WORK")).toHaveLength(4);
+    expect(savedDays.reduce((total, day) => total + day.cost, 0)).toBe(1000);
+
+    const offDate = savedDays.find((day) => day.date === "2026-11-01");
+    expect(offDate).toMatchObject({ status: "OFF", cost: 0 });
+  });
+
+  test("ถ้า insert TravelDay ล้มเหลว ต้อง rollback และเก็บข้อมูลเดิมไว้", async () => {
+    const daysBefore = await TravelDay.find({
+      monthId: regenerateMonth._id,
+    }).sort({ date: 1 });
+    const insertManySpy = vi
+      .spyOn(TravelDay, "insertMany")
+      .mockRejectedValueOnce(new Error("forced insert failure"));
+
+    try {
+      const response = await regenerateDays(
+        new Request(
+          `http://localhost/api/months/${regenerateMonth._id}/regenerate-days`,
+          { method: "POST" }
+        ),
+        {
+          params: Promise.resolve({ id: regenerateMonth._id.toString() }),
+        }
+      );
+
+      expect(response.status).toBe(500);
+
+      const daysAfter = await TravelDay.find({
+        monthId: regenerateMonth._id,
+      }).sort({ date: 1 });
+
+      expect(daysAfter.map((day) => day.date)).toEqual(
+        daysBefore.map((day) => day.date)
+      );
+      expect(daysAfter.map((day) => day.cost)).toEqual(
+        daysBefore.map((day) => day.cost)
+      );
+    } finally {
+      insertManySpy.mockRestore();
+    }
+  });
+});
