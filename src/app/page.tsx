@@ -15,6 +15,9 @@ import {
   Coffee,
   Plus,
   X,
+  History,
+  LayoutDashboard,
+  Eye,
 } from "lucide-react";
 interface MonthItem {
   _id: string;
@@ -43,6 +46,16 @@ interface MonthDetail {
     offDays: number;
     totalCost: number;
   };
+}
+
+interface MonthlyHistoryItem {
+  year: number;
+  month: number;
+  totalDays: number;
+  workDays: number;
+  offDays: number;
+  totalCost: number;
+  hasCalendar: boolean;
 }
 
 const weekdayLabels = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
@@ -134,6 +147,13 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [viewMode, setViewMode] = useState<"dashboard" | "history">(
+    "dashboard"
+  );
+  const [history, setHistory] = useState<MonthlyHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [historyYear, setHistoryYear] = useState("all");
 
   const [monthsReloadKey, setMonthsReloadKey] = useState(0);
 
@@ -234,6 +254,7 @@ const [offDateInput, setOffDateInput] = useState("");
     async function loadMonth() {
       setLoading(true);
       setError("");
+      setData(null);
 
       try {
         const result = await fetchMonthDetail(selectedMonthId);
@@ -258,6 +279,50 @@ const [offDateInput, setOffDateInput] = useState("");
       active = false;
     };
   }, [selectedMonthId, reloadKey]);
+
+  useEffect(() => {
+    if (viewMode !== "history") return;
+
+    let active = true;
+
+    async function loadHistory() {
+      setHistoryLoading(true);
+      setHistoryError("");
+
+      try {
+        const response = await fetch("/api/months/history");
+        const payload = await readJson<{
+          history?: MonthlyHistoryItem[];
+          message?: string;
+        }>(response);
+
+        if (!response.ok || !payload?.history) {
+          throw new Error(
+            payload?.message ?? "โหลดประวัติรายเดือนไม่สำเร็จ"
+          );
+        }
+
+        if (active) setHistory(payload.history);
+      } catch (err) {
+        if (active) {
+          setHistory([]);
+          setHistoryError(
+            err instanceof Error
+              ? err.message
+              : "เกิดข้อผิดพลาดในการโหลดประวัติรายเดือน"
+          );
+        }
+      } finally {
+        if (active) setHistoryLoading(false);
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      active = false;
+    };
+  }, [viewMode]);
 
   // แปลงข้อมูล TravelDay เป็นช่องปฏิทิน
   const calendarCells = useMemo(() => {
@@ -312,6 +377,17 @@ const [offDateInput, setOffDateInput] = useState("");
   }, [data]);
 
   const selectedMonth = data?.month;
+  const historyYears = useMemo(
+    () => [...new Set(history.map((item) => item.year))].sort((a, b) => b - a),
+    [history]
+  );
+  const filteredHistory = useMemo(
+    () =>
+      historyYear === "all"
+        ? history
+        : history.filter((item) => item.year === Number(historyYear)),
+    [history, historyYear]
+  );
 
   function openSettings() {
     if (!selectedMonth) return;
@@ -703,8 +779,38 @@ async function handleCreateMonth(
             </div>
           </div>
 
-        <div>
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+  <button
+    type="button"
+    onClick={() => setViewMode("dashboard")}
+    className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm transition ${
+      viewMode === "dashboard"
+        ? "bg-pink-500 font-semibold text-white"
+        : "border border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/[0.08]"
+    }`}
+  >
+    <LayoutDashboard size={16} />
+    Dashboard
+  </button>
+
+  <button
+    type="button"
+    onClick={() => {
+      setHistoryError("");
+      setViewMode("history");
+    }}
+    className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm transition ${
+      viewMode === "history"
+        ? "bg-pink-500 font-semibold text-white"
+        : "border border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/[0.08]"
+    }`}
+  >
+    <History size={16} />
+    Monthly History
+  </button>
+
+  {viewMode === "dashboard" && (
+    <>
   <button
     type="button"
     onClick={() => {
@@ -742,10 +848,160 @@ async function handleCreateMonth(
   >
     ตั้งค่าเดือน
   </button>
+    </>
+  )}
 </div>
-          </div>
         </header>
 
+        {viewMode === "history" ? (
+          <section className="space-y-6">
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+              <div>
+                <p className="mb-2 text-sm text-pink-400">MONTHLY HISTORY</p>
+                <h2 className="text-3xl font-bold sm:text-4xl">
+                  ประวัติค่าเดินทาง
+                </h2>
+                <p className="mt-2 text-sm text-zinc-500">
+                  ดูสรุปค่าเดินทางย้อนหลังจากข้อมูลจริงในระบบ
+                </p>
+              </div>
+
+              {historyYears.length > 0 && (
+                <label className="flex items-center gap-3 text-sm text-zinc-400">
+                  ปี
+                  <select
+                    value={historyYear}
+                    onChange={(event) => setHistoryYear(event.target.value)}
+                    className="min-w-36 rounded-xl border border-white/10 bg-[#181820] px-4 py-3 text-sm text-white outline-none transition focus:border-pink-500"
+                  >
+                    <option value="all">ทั้งหมด</option>
+                    {historyYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {historyError && (
+              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+                {historyError}
+              </div>
+            )}
+
+            {historyLoading && (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center text-sm text-zinc-400">
+                กำลังโหลดประวัติรายเดือน...
+              </div>
+            )}
+
+            {!historyLoading && !historyError && history.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center">
+                <History className="mx-auto mb-3 text-pink-400" size={34} />
+                <h3 className="font-semibold">ยังไม่มีประวัติรายเดือน</h3>
+                <p className="mt-2 text-sm text-zinc-500">
+                  สร้างเดือนและปฏิทินก่อน แล้วประวัติจะแสดงตรงนี้
+                </p>
+              </div>
+            )}
+
+            {!historyLoading && !historyError && history.length > 0 && filteredHistory.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center text-sm text-zinc-500">
+                ไม่พบประวัติของปีที่เลือก
+              </div>
+            )}
+
+            {!historyLoading && !historyError && filteredHistory.length > 0 && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {filteredHistory.map((item) => {
+                  const matchingMonth = months.find(
+                    (month) =>
+                      month.year === item.year && month.month === item.month
+                  );
+                  const canOpenCalendar = item.hasCalendar && Boolean(matchingMonth);
+
+                  return (
+                    <article
+                      key={`${item.year}-${item.month}`}
+                      className="rounded-2xl border border-white/10 bg-[#13131B] p-5 transition hover:border-pink-500/30 sm:p-6"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold tracking-[0.18em] text-pink-400">
+                            MONTH
+                          </p>
+                          <h3 className="mt-2 text-xl font-bold text-white">
+                            {formatMonth(item.year, item.month)}
+                          </h3>
+                        </div>
+                        <span
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                            item.hasCalendar
+                              ? "bg-pink-500/15 text-pink-300"
+                              : "bg-zinc-700/40 text-zinc-400"
+                          }`}
+                        >
+                          {item.hasCalendar ? "มีปฏิทินแล้ว" : "ยังไม่มีปฏิทิน"}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                          <p className="text-xs text-zinc-500">ทั้งหมด</p>
+                          <p className="mt-2 font-semibold text-white">{item.totalDays} วัน</p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                          <p className="text-xs text-zinc-500">วันทำงาน</p>
+                          <p className="mt-2 font-semibold text-pink-300">{item.workDays} วัน</p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                          <p className="text-xs text-zinc-500">วันหยุด</p>
+                          <p className="mt-2 font-semibold text-zinc-300">{item.offDays} วัน</p>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                          <p className="text-xs text-zinc-500">รวม</p>
+                          <p className="mt-2 font-semibold text-white">{formatMoney(item.totalCost)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 flex justify-end">
+                        {canOpenCalendar ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!matchingMonth) return;
+
+                              setSelectedDay(null);
+                              setIsEditingDay(false);
+                              setShowSettings(false);
+                              setEditDaySuccess("");
+                              setData(null);
+                              setLoading(true);
+                              setError("");
+                              setSelectedMonthId(matchingMonth._id);
+                              setViewMode("dashboard");
+                            }}
+                            className="flex items-center gap-2 rounded-xl border border-pink-500/30 px-4 py-2.5 text-sm font-semibold text-pink-300 transition hover:bg-pink-500/10"
+                          >
+                            <Eye size={16} />
+                            ดูปฏิทิน
+                          </button>
+                        ) : (
+                          <span className="text-sm text-zinc-600">
+                            ยังไม่มีข้อมูลวันเดินทาง
+                          </span>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : (
+        <>
         {/* Title and month selector */}
         <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
@@ -767,6 +1023,8 @@ async function handleCreateMonth(
               setIsEditingDay(false);
               setEditDaySuccess("");
               setShowSettings(false);
+              setData(null);
+              setLoading(true);
               setSelectedMonthId(event.target.value);
             }}
             disabled={months.length === 0}
@@ -1529,6 +1787,8 @@ async function handleCreateMonth(
               เลือกเดือนด้านบนเพื่อดูปฏิทินและสรุปค่าเดินทางของเดือนอื่น
             </p>
           </>
+        )}
+        </>
         )}
       </div>
     </main>

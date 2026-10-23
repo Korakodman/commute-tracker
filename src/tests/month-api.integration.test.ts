@@ -10,12 +10,16 @@ import {
 } from "@/app/api/months/[id]/route";
 import { POST as generateDays } from "@/app/api/months/[id]/generate-days/route";
 import { POST as regenerateDays } from "@/app/api/months/[id]/regenerate-days/route";
+import { GET as getHistory } from "@/app/api/months/history/route";
 const TEST_DB_URL =
   "mongodb://127.0.0.1:27017/commute-tracker-test";
 
 let testMonth: InstanceType<typeof Month>;
 let settingsMonth: InstanceType<typeof Month>;
 let regenerateMonth: InstanceType<typeof Month>;
+let historyWithCalendarMonth: InstanceType<typeof Month>;
+let historyEmptyMonth: InstanceType<typeof Month>;
+let historyOtherMonth: InstanceType<typeof Month>;
 
 beforeAll(async () => {
   // ให้ integration test ใช้ DB แยกจาก DB ที่เราใช้พัฒนา
@@ -51,6 +55,51 @@ regenerateMonth = await Month.create({
   workDays: [1, 2, 3, 4, 5],
   offDates: [],
 });
+
+historyWithCalendarMonth = await Month.create({
+  year: 2027,
+  month: 1,
+  defaultDailyCost: 100,
+  workDays: [1, 2, 3, 4, 5],
+  offDates: [],
+});
+
+historyEmptyMonth = await Month.create({
+  year: 2026,
+  month: 12,
+  defaultDailyCost: 200,
+  workDays: [1, 2, 3, 4, 5],
+  offDates: [],
+});
+
+historyOtherMonth = await Month.create({
+  year: 2025,
+  month: 12,
+  defaultDailyCost: 300,
+  workDays: [1, 2, 3, 4, 5],
+  offDates: [],
+});
+
+await TravelDay.create([
+  {
+    monthId: historyWithCalendarMonth._id,
+    date: "2027-01-04",
+    status: "WORK",
+    cost: 999,
+  },
+  {
+    monthId: historyWithCalendarMonth._id,
+    date: "2027-01-03",
+    status: "OFF",
+    cost: 0,
+  },
+  {
+    monthId: historyOtherMonth._id,
+    date: "2025-12-01",
+    status: "WORK",
+    cost: 50,
+  },
+]);
 });
 
 
@@ -79,6 +128,26 @@ await TravelDay.deleteMany({
 
 await Month.deleteOne({
   _id: regenerateMonth._id,
+});
+
+await TravelDay.deleteMany({
+  monthId: {
+    $in: [
+      historyWithCalendarMonth._id,
+      historyEmptyMonth._id,
+      historyOtherMonth._id,
+    ],
+  },
+});
+
+await Month.deleteMany({
+  _id: {
+    $in: [
+      historyWithCalendarMonth._id,
+      historyEmptyMonth._id,
+      historyOtherMonth._id,
+    ],
+  },
 });
 
   await mongoose.connection.close();
@@ -375,5 +444,95 @@ describe("Regenerate Month API Integration", () => {
     } finally {
       insertManySpy.mockRestore();
     }
+  });
+});
+
+describe("Monthly History API Integration", () => {
+  test("ควรคืนข้อมูลหลายเดือนเรียงจากใหม่ไปเก่า พร้อม summary ที่แยกตามเดือน", async () => {
+    const response = await getHistory();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+
+    const history = body.history as Array<{
+      year: number;
+      month: number;
+      totalDays: number;
+      workDays: number;
+      offDays: number;
+      totalCost: number;
+      hasCalendar: boolean;
+    }>;
+
+    const historyOrder = history.map((item) => [item.year, item.month]);
+    const sortedOrder = [...historyOrder].sort(
+      ([yearA, monthA], [yearB, monthB]) =>
+        yearB - yearA || monthB - monthA
+    );
+
+    expect(historyOrder).toEqual(sortedOrder);
+
+    expect(history).toContainEqual({
+      year: 2027,
+      month: 1,
+      totalDays: 2,
+      workDays: 1,
+      offDays: 1,
+      totalCost: 999,
+      hasCalendar: true,
+    });
+
+    expect(history).toContainEqual({
+      year: 2026,
+      month: 12,
+      totalDays: 0,
+      workDays: 0,
+      offDays: 0,
+      totalCost: 0,
+      hasCalendar: false,
+    });
+
+    expect(history).toContainEqual({
+      year: 2025,
+      month: 12,
+      totalDays: 1,
+      workDays: 1,
+      offDays: 0,
+      totalCost: 50,
+      hasCalendar: true,
+    });
+
+    const currentMonth = history.find(
+      (item) => item.year === 2027 && item.month === 1
+    );
+    const otherMonth = history.find(
+      (item) => item.year === 2025 && item.month === 12
+    );
+
+    expect(currentMonth?.totalCost).toBe(999);
+    expect(otherMonth?.totalCost).toBe(50);
+  });
+
+  test("ไม่ควรแก้ไขข้อมูล Month หรือ TravelDay จากการเรียก History API", async () => {
+    const monthBefore = await Month.findById(historyWithCalendarMonth._id).lean();
+    const daysBefore = await TravelDay.find({
+      monthId: historyWithCalendarMonth._id,
+    })
+      .sort({ date: 1 })
+      .lean();
+
+    const response = await getHistory();
+
+    expect(response.status).toBe(200);
+
+    const monthAfter = await Month.findById(historyWithCalendarMonth._id).lean();
+    const daysAfter = await TravelDay.find({
+      monthId: historyWithCalendarMonth._id,
+    })
+      .sort({ date: 1 })
+      .lean();
+
+    expect(monthAfter).toEqual(monthBefore);
+    expect(daysAfter).toEqual(daysBefore);
   });
 });
