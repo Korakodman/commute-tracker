@@ -2,6 +2,7 @@
 import { MonthSchema } from "@/schemas/MonthSchema";
 import Month from "@/app/Models/Month";
 import { connectDB } from "@/lib/db";
+import { findInvalidOffDate } from "@/lib/month-validation";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -37,6 +38,22 @@ if(!result.success){
         },
         {status:400}
     )
+}
+
+const invalidOffDate = findInvalidOffDate(
+  result.data.offDates,
+  result.data.year,
+  result.data.month
+);
+
+if (invalidOffDate) {
+  return NextResponse.json(
+    {
+      message: "วันที่หยุดไม่ถูกต้องหรือไม่ตรงกับเดือนที่ระบุ",
+      invalidDate: invalidOffDate,
+    },
+    { status: 400 }
+  );
 }
 
 try {

@@ -11,6 +11,9 @@ import {
 import { POST as generateDays } from "@/app/api/months/[id]/generate-days/route";
 import { POST as regenerateDays } from "@/app/api/months/[id]/regenerate-days/route";
 import { GET as getHistory } from "@/app/api/months/history/route";
+import { POST as createMonth } from "@/app/api/months/route";
+import { POST as createTravelDay } from "@/app/api/travel-days/route";
+import { PATCH as updateTravelDay } from "@/app/api/travel-days/[id]/route";
 const TEST_DB_URL =
   "mongodb://127.0.0.1:27017/commute-tracker-test";
 
@@ -20,6 +23,7 @@ let regenerateMonth: InstanceType<typeof Month>;
 let historyWithCalendarMonth: InstanceType<typeof Month>;
 let historyEmptyMonth: InstanceType<typeof Month>;
 let historyOtherMonth: InstanceType<typeof Month>;
+let integrityMonth: InstanceType<typeof Month>;
 
 beforeAll(async () => {
   // ให้ integration test ใช้ DB แยกจาก DB ที่เราใช้พัฒนา
@@ -76,6 +80,14 @@ historyOtherMonth = await Month.create({
   year: 2025,
   month: 12,
   defaultDailyCost: 300,
+  workDays: [1, 2, 3, 4, 5],
+  offDates: [],
+});
+
+integrityMonth = await Month.create({
+  year: 2036,
+  month: 1,
+  defaultDailyCost: 100,
   workDays: [1, 2, 3, 4, 5],
   offDates: [],
 });
@@ -149,6 +161,9 @@ await Month.deleteMany({
     ],
   },
 });
+
+await TravelDay.deleteMany({ monthId: integrityMonth._id });
+await Month.deleteOne({ _id: integrityMonth._id });
 
   await mongoose.connection.close();
 });
@@ -444,6 +459,178 @@ describe("Regenerate Month API Integration", () => {
     } finally {
       insertManySpy.mockRestore();
     }
+  });
+});
+
+describe("TravelDay data integrity integration", () => {
+  test("POST OFF ที่มี cost มากกว่า 0 ต้องบันทึก cost เป็น 0", async () => {
+    const response = await createTravelDay(
+      new Request("http://localhost/api/travel-days", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthId: integrityMonth._id.toString(),
+          date: "2036-01-02",
+          status: "OFF",
+          cost: 999,
+          note: "integrity test",
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.travelDay.cost).toBe(0);
+  });
+
+  test("PATCH WORK เป็น OFF โดยไม่ส่ง cost ต้อง zero cost", async () => {
+    const createResponse = await createTravelDay(
+      new Request("http://localhost/api/travel-days", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthId: integrityMonth._id.toString(),
+          date: "2036-01-03",
+          status: "WORK",
+          cost: 321,
+          note: "integrity test",
+        }),
+      })
+    );
+    const created = await createResponse.json();
+
+    const response = await updateTravelDay(
+      new Request("http://localhost/api/travel-days", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "OFF" }),
+      }),
+      { params: Promise.resolve({ id: created.travelDay._id.toString() }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.travelDay.status).toBe("OFF");
+    expect(body.travelDay.cost).toBe(0);
+  });
+
+  test("PATCH OFF ที่ส่ง cost มากกว่า 0 ต้องยังบันทึกเป็น 0", async () => {
+    const travelDay = await TravelDay.findOne({
+      monthId: integrityMonth._id,
+      date: "2036-01-02",
+    });
+
+    const response = await updateTravelDay(
+      new Request("http://localhost/api/travel-days", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "OFF", cost: 500 }),
+      }),
+      { params: Promise.resolve({ id: travelDay!._id.toString() }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.travelDay.cost).toBe(0);
+  });
+
+  test("PATCH WORK พร้อม cost ปกติต้องเก็บค่าใช้จ่ายที่ส่งมา", async () => {
+    const travelDay = await TravelDay.findOne({
+      monthId: integrityMonth._id,
+      date: "2036-01-02",
+    });
+
+    const response = await updateTravelDay(
+      new Request("http://localhost/api/travel-days", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "WORK", cost: 321 }),
+      }),
+      { params: Promise.resolve({ id: travelDay!._id.toString() }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.travelDay.status).toBe("WORK");
+    expect(body.travelDay.cost).toBe(321);
+  });
+});
+
+describe("Month offDates validation integration", () => {
+  async function postMonth(year: number, month: number, offDates: string[]) {
+    return createMonth(
+      new Request("http://localhost/api/months", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year,
+          month,
+          defaultDailyCost: 100,
+          workDays: [1, 2, 3, 4, 5],
+          offDates,
+        }),
+      })
+    );
+  }
+
+  test.each([
+    [2037, 1, ["2037-01-01x"]],
+    [2038, 2, ["2038-02-30"]],
+    [2039, 9, ["2039-10-01"]],
+  ])("POST ต้อง reject offDate ที่ไม่ถูกต้อง: %s-%s", async (year, month, offDates) => {
+    const response = await postMonth(year, month, offDates);
+
+    expect(response.status).toBe(400);
+    expect(await Month.findOne({ year, month })).toBeNull();
+  });
+
+  test("POST ต้องยอมรับวัน leap year ที่ถูกต้องและวันปกติในเดือน", async () => {
+    const leapResponse = await postMonth(2040, 2, ["2040-02-29"]);
+    const validResponse = await postMonth(2041, 9, ["2041-09-15"]);
+
+    expect(leapResponse.status).toBe(201);
+    expect(validResponse.status).toBe(201);
+    expect((await leapResponse.json()).NewMonth.offDates).toContain("2040-02-29");
+    expect((await validResponse.json()).NewMonth.offDates).toContain("2041-09-15");
+  });
+
+  test("PATCH ต้อง reject offDate ที่ไม่ถูกต้องและไม่เปลี่ยนข้อมูลเดิม", async () => {
+    const month = await Month.create({
+      year: 2042,
+      month: 9,
+      defaultDailyCost: 100,
+      workDays: [1, 2, 3, 4, 5],
+      offDates: [],
+    });
+
+    for (const offDate of ["2042-09-31", "2042-10-01", "2042-09-01x"]) {
+      const response = await updateMonth(
+        new Request("http://localhost/api/months", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offDates: [offDate] }),
+        }),
+        { params: Promise.resolve({ id: month._id.toString() }) }
+      );
+
+      expect(response.status).toBe(400);
+    }
+
+    const unchanged = await Month.findById(month._id);
+    expect(unchanged?.offDates).toEqual([]);
+
+    const validResponse = await updateMonth(
+      new Request("http://localhost/api/months", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offDates: ["2042-09-29"] }),
+      }),
+      { params: Promise.resolve({ id: month._id.toString() }) }
+    );
+
+    expect(validResponse.status).toBe(200);
+    expect((await Month.findById(month._id))?.offDates).toEqual(["2042-09-29"]);
+    await Month.deleteOne({ _id: month._id });
   });
 });
 

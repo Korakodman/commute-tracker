@@ -58,6 +58,12 @@ interface MonthlyHistoryItem {
   hasCalendar: boolean;
 }
 
+interface MonthSettingsPayload {
+  defaultDailyCost: number;
+  workDays: number[];
+  offDates: string[];
+}
+
 const weekdayLabels = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 
 function formatMoney(value: number) {
@@ -168,6 +174,9 @@ const [settingsOffDateInput, setSettingsOffDateInput] = useState("");
 const [settingsError, setSettingsError] = useState("");
 const [settingsSuccess, setSettingsSuccess] = useState("");
 const [isSavingSettings, setIsSavingSettings] = useState(false);
+const [showRegenerateConfirmation, setShowRegenerateConfirmation] = useState(false);
+const [pendingSettingsPayload, setPendingSettingsPayload] =
+  useState<MonthSettingsPayload | null>(null);
 
 const [showCreateForm, setShowCreateForm] = useState(false);
 const [isCreatingMonth, setIsCreatingMonth] = useState(false);
@@ -411,6 +420,26 @@ const [offDateInput, setOffDateInput] = useState("");
     setSettingsOffDateInput("");
   }
 
+  function cancelRegenerateConfirmation() {
+    if (isSavingSettings) return;
+    setShowRegenerateConfirmation(false);
+    setPendingSettingsPayload(null);
+  }
+
+  useEffect(() => {
+    if (!showRegenerateConfirmation) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isSavingSettings) {
+        setShowRegenerateConfirmation(false);
+        setPendingSettingsPayload(null);
+      }
+    }
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [showRegenerateConfirmation, isSavingSettings]);
+
   function addSettingsOffDate() {
     setSettingsError("");
 
@@ -447,7 +476,6 @@ const [offDateInput, setOffDateInput] = useState("");
     event.preventDefault();
     setSettingsError("");
     setSettingsSuccess("");
-    setIsSavingSettings(true);
 
     const dailyCost = Number(settingsDailyCost);
 
@@ -498,7 +526,15 @@ const [offDateInput, setOffDateInput] = useState("");
       offDates: [...settingsOffDates].sort(),
     };
 
+    setPendingSettingsPayload(payload);
+    setShowRegenerateConfirmation(true);
+  }
+
+  async function handleConfirmRegenerate() {
+    if (!selectedMonthId || !pendingSettingsPayload) return;
+
     setIsSavingSettings(true);
+    setSettingsError("");
 
     try {
       const response = await fetch(`/api/months/${selectedMonthId}`, {
@@ -506,7 +542,7 @@ const [offDateInput, setOffDateInput] = useState("");
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(pendingSettingsPayload),
       });
       const responsePayload = await readJson<{ message?: string }>(response);
 
@@ -539,6 +575,8 @@ const [offDateInput, setOffDateInput] = useState("");
       setSettingsOffDateInput("");
       setShowSettings(false);
       setSettingsSuccess("บันทึกการตั้งค่าสำเร็จ");
+      setShowRegenerateConfirmation(false);
+      setPendingSettingsPayload(null);
     } catch (saveError) {
       setSettingsError(
         saveError instanceof Error
@@ -1497,6 +1535,55 @@ async function handleCreateMonth(
               </button>
             </div>
           </form>
+        )}
+
+        {showRegenerateConfirmation && pendingSettingsPayload && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                cancelRegenerateConfirmation();
+              }
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="regenerate-confirmation-title"
+              className="w-full max-w-md rounded-2xl border border-pink-500/30 bg-[#15151D] p-6 shadow-2xl"
+            >
+              <h3
+                id="regenerate-confirmation-title"
+                className="text-lg font-semibold text-white"
+              >
+                ยืนยันการสร้างปฏิทินใหม่
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-zinc-300">
+                การบันทึก Settings จะลบและสร้างข้อมูล TravelDay ของเดือนนี้ใหม่
+                ข้อมูลค่าใช้จ่ายรายวันที่แก้เองอาจถูกเขียนทับ ต้องการดำเนินการต่อหรือไม่
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={cancelRegenerateConfirmation}
+                  disabled={isSavingSettings}
+                  autoFocus
+                  className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmRegenerate}
+                  disabled={isSavingSettings}
+                  className="rounded-xl bg-pink-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingSettings ? "กำลังสร้างใหม่..." : "สร้างใหม่"}
+                </button>
+              </div>
+            </section>
+          </div>
         )}
 
         {settingsSuccess && !showSettings && (

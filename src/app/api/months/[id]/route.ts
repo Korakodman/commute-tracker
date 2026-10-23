@@ -7,21 +7,7 @@ import TravelDay from "@/app/Models/TravelDay";
 import { UpdateMonthSchema } from "@/schemas/MonthSchema";
 
 import { calculateMonthlyCost } from "@/lib/calculations";
-
-
-function isValidDateString(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
-
-  const testDate = new Date(
-    Date.UTC(year, month - 1, day)
-  );
-
-  return (
-    testDate.getUTCFullYear() === year &&
-    testDate.getUTCMonth() === month - 1 &&
-    testDate.getUTCDate() === day
-  );
-}
+import { isDateInMonth, isValidDateString } from "@/lib/month-validation";
 
 export async function GET(req:Request,{params}:{params : Promise<{id:string}>}) {
     await connectDB()
@@ -91,7 +77,15 @@ export async function PATCH(
   }
 
   // 3. Validate body ด้วย Zod
-  const body: unknown = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { message: "ข้อมูล JSON ไม่ถูกต้อง" },
+      { status: 400 }
+    );
+  }
   const result = UpdateMonthSchema.safeParse(body);
 
   if (!result.success) {
@@ -121,16 +115,7 @@ export async function PATCH(
 
   // 5. ตรวจว่าวันหยุดอยู่ในเดือนที่กำลังแก้ไข
   const outsideMonthDate = result.data.offDates?.find(
-    (date) => {
-      const [year, monthNumber] = date
-        .split("-")
-        .map(Number);
-
-      return (
-        year !== month.year ||
-        monthNumber !== month.month
-      );
-    }
+    (date) => isValidDateString(date) && !isDateInMonth(date, month.year, month.month)
   );
 
   if (outsideMonthDate) {

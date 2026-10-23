@@ -88,7 +88,7 @@ if (!isValidDateString(date)) {
       monthId,
       date,
       status,
-      cost,
+      cost: status === "OFF" ? 0 : cost,
       note,
     });
 

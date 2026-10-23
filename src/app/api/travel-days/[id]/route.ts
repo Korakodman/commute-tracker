@@ -100,6 +100,14 @@ export async function PATCH(
   const targetDate =
     result.data.date ?? currentTravelDay.date;
 
+  const normalizedData = {
+    ...result.data,
+    ...(result.data.status === "OFF" ||
+    (result.data.status === undefined && currentTravelDay.status === "OFF")
+      ? { cost: 0 }
+      : {}),
+  };
+
   // 8. ตรวจว่าเป็นวันที่จริง
   if (!isValidDateString(targetDate)) {
     return NextResponse.json(
@@ -128,7 +136,7 @@ export async function PATCH(
     const updatedTravelDay =
       await TravelDay.findByIdAndUpdate(
         id,
-        result.data,
+        normalizedData,
         {
           returnDocument: "after",
           runValidators: true,
