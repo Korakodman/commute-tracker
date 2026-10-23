@@ -131,6 +131,9 @@ const settingsWorkDayOptions = [
   workDayOptions[0],
 ];
 
+const numberInputClass =
+  "w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
 export default function Home() {
   const [months, setMonths] = useState<MonthItem[]>([]);
   const [selectedMonthId, setSelectedMonthId] = useState("");
@@ -139,7 +142,7 @@ export default function Home() {
   const [editStatus, setEditStatus] = useState<TravelDay["status"]>(
     "WORK"
   );
-  const [editCost, setEditCost] = useState(0);
+  const [editCost, setEditCost] = useState<number | "">(0);
   const [isSavingDay, setIsSavingDay] = useState(false);
   const [editDayError, setEditDayError] = useState("");
   const [editDaySuccess, setEditDaySuccess] = useState("");
@@ -158,7 +161,7 @@ export default function Home() {
   const [monthsReloadKey, setMonthsReloadKey] = useState(0);
 
 const [showSettings, setShowSettings] = useState(false);
-const [settingsDailyCost, setSettingsDailyCost] = useState(0);
+const [settingsDailyCost, setSettingsDailyCost] = useState<number | "">(0);
 const [settingsWorkDays, setSettingsWorkDays] = useState<number[]>([]);
 const [settingsOffDates, setSettingsOffDates] = useState<string[]>([]);
 const [settingsOffDateInput, setSettingsOffDateInput] = useState("");
@@ -172,13 +175,13 @@ const [isCreatingMonth, setIsCreatingMonth] = useState(false);
 const [createError, setCreateError] = useState("");
 const [createSuccess, setCreateSuccess] = useState("");
 
-const [createYear, setCreateYear] = useState(
+const [createYear, setCreateYear] = useState<number | "">(
   new Date().getFullYear()
 );
 const [createMonth, setCreateMonth] = useState(
   new Date().getMonth() + 1
 );
-const [createDailyCost, setCreateDailyCost] = useState(134);
+const [createDailyCost, setCreateDailyCost] = useState<number | "">(134);
 
 const [createWorkDays, setCreateWorkDays] = useState<number[]>([
   1, 2, 3, 4, 5,
@@ -636,6 +639,11 @@ const [offDateInput, setOffDateInput] = useState("");
     return;
   }
 
+  if (createYear === "") {
+    setCreateError("กรุณาระบุปีเป็นตัวเลขก่อนเพิ่มวันหยุด");
+    return;
+  }
+
   const monthPrefix =
     `${createYear}-${String(createMonth).padStart(2, "0")}-`;
 
@@ -664,8 +672,29 @@ async function handleCreateMonth(
   setCreateError("");
   setCreateSuccess("");
 
+  const year = Number(createYear);
+  const dailyCost = Number(createDailyCost);
+
+  if (
+    createYear === "" ||
+    !Number.isInteger(year) ||
+    year < 2000
+  ) {
+    setCreateError("กรุณาระบุปีเป็นจำนวนเต็มตั้งแต่ 2000 ขึ้นไป");
+    return;
+  }
+
+  if (
+    createDailyCost === "" ||
+    !Number.isFinite(dailyCost) ||
+    dailyCost < 0
+  ) {
+    setCreateError("กรุณาระบุค่าเดินทางเป็นตัวเลขตั้งแต่ 0 ขึ้นไป");
+    return;
+  }
+
   const monthPrefix =
-    `${createYear}-${String(createMonth).padStart(2, "0")}-`;
+    `${year}-${String(createMonth).padStart(2, "0")}-`;
 
   if (createOffDates.some((date) => !date.startsWith(monthPrefix))) {
     setCreateError(
@@ -683,9 +712,9 @@ async function handleCreateMonth(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        year: Number(createYear),
+        year,
         month: Number(createMonth),
-        defaultDailyCost: Number(createDailyCost),
+        defaultDailyCost: dailyCost,
         workDays: createWorkDays,
         offDates: createOffDates,
       }),
@@ -1082,12 +1111,16 @@ async function handleCreateMonth(
           type="number"
           min={2000}
           required
+          placeholder="2026"
           value={createYear}
           onChange={(event) =>
-            setCreateYear(Number(event.target.value))
+            setCreateYear(
+              event.target.value === "" ? "" : Number(event.target.value)
+            )
           }
-          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+          className={numberInputClass}
         />
+        <p className="text-xs text-zinc-500">พิมพ์ปีได้โดยตรง</p>
       </label>
 
       <label className="space-y-2 text-sm text-zinc-300">
@@ -1121,12 +1154,16 @@ async function handleCreateMonth(
           min={0}
           step="1"
           required
+          placeholder="200"
           value={createDailyCost}
           onChange={(event) =>
-            setCreateDailyCost(Number(event.target.value))
+            setCreateDailyCost(
+              event.target.value === "" ? "" : Number(event.target.value)
+            )
           }
-          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+          className={numberInputClass}
         />
+        <p className="text-xs text-zinc-500">พิมพ์ตัวเลขได้โดยตรง</p>
       </label>
     </div>
 
@@ -1186,10 +1223,18 @@ async function handleCreateMonth(
         <input
           type="date"
           value={offDateInput}
-          min={`${createYear}-${String(createMonth).padStart(2, "0")}-01`}
-          max={`${createYear}-${String(createMonth).padStart(2, "0")}-${String(
-            new Date(createYear, createMonth, 0).getDate()
-          ).padStart(2, "0")}`}
+          min={
+            createYear === ""
+              ? undefined
+              : `${createYear}-${String(createMonth).padStart(2, "0")}-01`
+          }
+          max={
+            createYear === ""
+              ? undefined
+              : `${createYear}-${String(createMonth).padStart(2, "0")}-${String(
+                  new Date(Number(createYear), createMonth, 0).getDate()
+                ).padStart(2, "0")}`
+          }
           onChange={(event) => setOffDateInput(event.target.value)}
           className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-sm text-white outline-none focus:border-pink-500"
         />
@@ -1294,12 +1339,20 @@ async function handleCreateMonth(
                 type="number"
                 min={0}
                 step="1"
+                placeholder="200"
                 value={settingsDailyCost}
                 onChange={(event) =>
-                  setSettingsDailyCost(Number(event.target.value))
+                  setSettingsDailyCost(
+                    event.target.value === ""
+                      ? ""
+                      : Number(event.target.value)
+                  )
                 }
-                className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                className={numberInputClass}
               />
+              <p className="text-xs text-zinc-500">
+                พิมพ์ตัวเลขได้โดยตรง
+              </p>
             </label>
 
             <div className="space-y-3">
@@ -1705,18 +1758,28 @@ async function handleCreateMonth(
                       </label>
 
                       <label className="space-y-2 text-sm text-zinc-300">
-                        ค่าเดินทาง
+                        ค่าเดินทาง (บาท)
                         <input
                           type="number"
                           min={0}
                           step="1"
-                          value={editStatus === "OFF" ? 0 : editCost}
+                          placeholder="200"
+                          value={editStatus === "OFF" ? "0" : editCost}
                           onChange={(event) =>
-                            setEditCost(Number(event.target.value))
+                            setEditCost(
+                              event.target.value === ""
+                                ? ""
+                                : Number(event.target.value)
+                            )
                           }
                           disabled={editStatus === "OFF"}
-                          className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          className={`${numberInputClass} disabled:cursor-not-allowed disabled:opacity-50`}
                         />
+                        {editStatus === "WORK" && (
+                          <p className="text-xs text-zinc-500">
+                            พิมพ์ตัวเลขได้โดยตรง
+                          </p>
+                        )}
                       </label>
                     </div>
 
