@@ -3,6 +3,7 @@ import { MonthSchema } from "@/schemas/MonthSchema";
 import Month from "@/app/Models/Month";
 import { connectDB } from "@/lib/db";
 import { findInvalidOffDate } from "@/lib/month-validation";
+import { findValidatedRouteSelection } from "@/lib/route-selection";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -54,6 +55,20 @@ if (invalidOffDate) {
     },
     { status: 400 }
   );
+}
+
+for (const selection of [
+  { id: result.data.selectedOutboundRouteId, type: "OUTBOUND" as const },
+  { id: result.data.selectedReturnRouteId, type: "RETURN" as const },
+]) {
+  const routeResult = await findValidatedRouteSelection(selection.id, selection.type);
+
+  if ("error" in routeResult) {
+    return NextResponse.json(
+      { message: routeResult.error.message },
+      { status: routeResult.error.status }
+    );
+  }
 }
 
 try {

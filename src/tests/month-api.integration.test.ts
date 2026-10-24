@@ -923,3 +923,247 @@ describe("TravelRoute CRUD API Integration", () => {
     expect(deletedAgain.status).toBe(404);
   });
 });
+
+describe("TravelRoute selection and Month regeneration integration", () => {
+  let outboundRoute: InstanceType<typeof TravelRoute>;
+  let returnRoute: InstanceType<typeof TravelRoute>;
+  let selectedMonth: InstanceType<typeof Month>;
+
+  beforeAll(async () => {
+    outboundRoute = await TravelRoute.create({
+      name: "integration-route-selected-outbound",
+      type: "OUTBOUND",
+      segments: [
+        { name: "bus", cost: 15 },
+        { name: "train", cost: 25 },
+      ],
+    });
+    returnRoute = await TravelRoute.create({
+      name: "integration-route-selected-return",
+      type: "RETURN",
+      segments: [
+        { name: "train", cost: 25 },
+        { name: "bus", cost: 15 },
+      ],
+    });
+    selectedMonth = await Month.create({
+      year: 2046,
+      month: 1,
+      defaultDailyCost: 999,
+      workDays: [1],
+      offDates: [],
+    });
+  });
+
+  afterAll(async () => {
+    await TravelDay.deleteMany({ monthId: selectedMonth._id });
+    await Month.deleteOne({ _id: selectedMonth._id });
+    await TravelRoute.deleteMany({
+      _id: { $in: [outboundRoute._id, returnRoute._id] },
+    });
+  });
+
+  async function regenerate(body?: Record<string, unknown>) {
+    return regenerateDays(
+      new Request(`http://localhost/api/months/${selectedMonth._id}/regenerate-days`, {
+        method: "POST",
+        ...(body
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }
+          : {}),
+      }),
+      { params: Promise.resolve({ id: selectedMonth._id.toString() }) }
+    );
+  }
+
+  test("เลือก OUTBOUND และ RETURN แล้ว WORK ใช้ cost รวมของ Route", async () => {
+    const response = await regenerate({
+      defaultDailyCost: 999,
+      workDays: [1],
+      offDates: [],
+      selectedOutboundRouteId: outboundRoute._id.toString(),
+      selectedReturnRouteId: returnRoute._id.toString(),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.totalCost).toBe(body.workDays * 80);
+
+    const savedMonth = await Month.findById(selectedMonth._id);
+    expect(savedMonth?.selectedOutboundRouteId?.toString()).toBe(
+      outboundRoute._id.toString()
+    );
+    expect(savedMonth?.selectedReturnRouteId?.toString()).toBe(
+      returnRoute._id.toString()
+    );
+    expect(
+      await TravelDay.findOne({ monthId: selectedMonth._id, status: "WORK" })
+    ).toMatchObject({ cost: 80 });
+  });
+
+  test("เลือกเฉพาะ OUTBOUND หรือ RETURN ใช้ cost ของฝั่งที่เลือก", async () => {
+    const outboundResponse = await regenerate({
+      selectedOutboundRouteId: outboundRoute._id.toString(),
+      selectedReturnRouteId: null,
+    });
+    expect(outboundResponse.status).toBe(200);
+    expect((await TravelDay.findOne({ monthId: selectedMonth._id, status: "WORK" }))?.cost).toBe(40);
+
+    const returnResponse = await regenerate({
+      selectedOutboundRouteId: null,
+      selectedReturnRouteId: returnRoute._id.toString(),
+    });
+    expect(returnResponse.status).toBe(200);
+    expect((await TravelDay.findOne({ monthId: selectedMonth._id, status: "WORK" }))?.cost).toBe(40);
+  });
+
+  test("ไม่เลือก Route ใช้ defaultDailyCost และ OFF เป็น 0 เสมอ", async () => {
+    const response = await regenerate({
+      defaultDailyCost: 123,
+      workDays: [1],
+      offDates: ["2046-01-07"],
+      selectedOutboundRouteId: null,
+      selectedReturnRouteId: null,
+    });
+    expect(response.status).toBe(200);
+
+    const savedDays = await TravelDay.find({ monthId: selectedMonth._id });
+    expect(savedDays.find((day) => day.status === "WORK")?.cost).toBe(123);
+    expect(savedDays.find((day) => day.date === "2046-01-07")).toMatchObject({
+      status: "OFF",
+      cost: 0,
+    });
+  });
+
+  test("Route ID ผิด type, ไม่ถูกต้อง และไม่พบ ต้องถูกปฏิเสธก่อนแก้ข้อมูล", async () => {
+    const monthBefore = await Month.findById(selectedMonth._id).lean();
+
+    const wrongType = await regenerate({
+      selectedOutboundRouteId: returnRoute._id.toString(),
+    });
+    const invalidId = await regenerate({ selectedOutboundRouteId: "invalid-id" });
+    const missing = await regenerate({
+      selectedOutboundRouteId: new mongoose.Types.ObjectId().toString(),
+    });
+
+    expect(wrongType.status).toBe(400);
+    expect(invalidId.status).toBe(400);
+    expect(missing.status).toBe(404);
+    expect(await Month.findById(selectedMonth._id).lean()).toEqual(monthBefore);
+  });
+
+  test("Request เดิมที่ไม่มี Body ใช้ Route selection ที่บันทึกไว้", async () => {
+    await Month.updateOne(
+      { _id: selectedMonth._id },
+      {
+        selectedOutboundRouteId: outboundRoute._id,
+        selectedReturnRouteId: returnRoute._id,
+        defaultDailyCost: 500,
+        offDates: [],
+      }
+    );
+
+    const response = await regenerate();
+    expect(response.status).toBe(200);
+    expect((await TravelDay.findOne({ monthId: selectedMonth._id, status: "WORK" }))?.cost).toBe(80);
+  });
+
+  test("Insert TravelDay ล้มเหลวต้อง rollback Month และ TravelDay เดิม", async () => {
+    const rollbackMonth = await Month.create({
+      year: 2047,
+      month: 1,
+      defaultDailyCost: 77,
+      workDays: [1],
+      offDates: [],
+      selectedOutboundRouteId: null,
+      selectedReturnRouteId: null,
+    });
+    const oldDay = await TravelDay.create({
+      monthId: rollbackMonth._id,
+      date: "legacy-route-day",
+      status: "WORK",
+      cost: 321,
+      note: "keep me",
+    });
+    const monthBefore = await Month.findById(rollbackMonth._id).lean();
+    const insertManySpy = vi
+      .spyOn(TravelDay, "insertMany")
+      .mockRejectedValueOnce(new Error("forced route insert failure"));
+
+    try {
+      const response = await regenerateDays(
+        new Request(`http://localhost/api/months/${rollbackMonth._id}/regenerate-days`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            defaultDailyCost: 999,
+            workDays: [1],
+            offDates: [],
+            selectedOutboundRouteId: outboundRoute._id.toString(),
+            selectedReturnRouteId: returnRoute._id.toString(),
+          }),
+        }),
+        { params: Promise.resolve({ id: rollbackMonth._id.toString() }) }
+      );
+
+      expect(response.status).toBe(500);
+      expect(await Month.findById(rollbackMonth._id).lean()).toEqual(monthBefore);
+      expect(await TravelDay.findById(oldDay._id)).toMatchObject({
+        date: "legacy-route-day",
+        cost: 321,
+        note: "keep me",
+      });
+      expect(await TravelDay.countDocuments({ monthId: rollbackMonth._id })).toBe(1);
+    } finally {
+      insertManySpy.mockRestore();
+      await TravelDay.deleteMany({ monthId: rollbackMonth._id });
+      await Month.deleteOne({ _id: rollbackMonth._id });
+    }
+  });
+
+  test("ลบ Route ที่ถูกเลือกใช้งานใน Month ต้องคืน 409", async () => {
+    await Month.updateOne(
+      { _id: selectedMonth._id },
+      { selectedOutboundRouteId: outboundRoute._id }
+    );
+
+    const response = await deleteRoute(
+      new Request("http://localhost/api/routes"),
+      { params: Promise.resolve({ id: outboundRoute._id.toString() }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(await TravelRoute.findById(outboundRoute._id)).not.toBeNull();
+  });
+
+  test("Month เก่าที่ไม่มี selected Route fields ยัง regenerate ได้", async () => {
+    const legacyMonthId = new mongoose.Types.ObjectId();
+    await Month.collection.insertOne({
+      _id: legacyMonthId,
+      year: 2048,
+      month: 1,
+      defaultDailyCost: 88,
+      workDays: [1],
+      offDates: [],
+    });
+
+    try {
+      const response = await regenerateDays(
+        new Request(`http://localhost/api/months/${legacyMonthId}/regenerate-days`, {
+          method: "POST",
+        }),
+        { params: Promise.resolve({ id: legacyMonthId.toString() }) }
+      );
+
+      expect(response.status).toBe(200);
+      expect(
+        (await TravelDay.findOne({ monthId: legacyMonthId, status: "WORK" }))?.cost
+      ).toBe(88);
+    } finally {
+      await TravelDay.deleteMany({ monthId: legacyMonthId });
+      await Month.deleteOne({ _id: legacyMonthId });
+    }
+  });
+});

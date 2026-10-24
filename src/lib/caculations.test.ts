@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { calculateDailyCost,calculateRouteCost,calculateMonthlyCost } from "./calculations";
+import {
+  calculateDailyCost,
+  calculateRouteCost,
+  calculateMonthlyCost,
+  calculateSelectedRoutesCost,
+} from "./calculations";
 
 describe("calculateRouteCost", () => {
   test("ควรคำนวณค่าเดินทางรวมของ route ได้ถูกต้อง", () => {
@@ -69,6 +74,15 @@ test("route ว่างควรมีค่าเป็น 0", () => {
   const result = calculateRouteCost([]);
 
   expect(result).toBe(0);
+});
+
+test("ควรรวมเฉพาะ Route ที่เลือก และคืน undefined เมื่อไม่เลือก Route", () => {
+  const outbound = { segments: [{ name: "bus", cost: 15 }] };
+  const returnRoute = { segments: [{ name: "train", cost: 25 }] };
+
+  expect(calculateSelectedRoutesCost(outbound, returnRoute)).toBe(40);
+  expect(calculateSelectedRoutesCost(outbound, null)).toBe(15);
+  expect(calculateSelectedRoutesCost(null, null)).toBeUndefined();
 });
 
 

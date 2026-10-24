@@ -8,6 +8,7 @@ import { UpdateMonthSchema } from "@/schemas/MonthSchema";
 
 import { calculateMonthlyCost } from "@/lib/calculations";
 import { isDateInMonth, isValidDateString } from "@/lib/month-validation";
+import { findValidatedRouteSelection } from "@/lib/route-selection";
 
 export async function GET(req:Request,{params}:{params : Promise<{id:string}>}) {
     await connectDB()
@@ -126,6 +127,20 @@ export async function PATCH(
       },
       { status: 400 }
     );
+  }
+
+  for (const selection of [
+    { id: result.data.selectedOutboundRouteId, type: "OUTBOUND" as const },
+    { id: result.data.selectedReturnRouteId, type: "RETURN" as const },
+  ]) {
+    const routeResult = await findValidatedRouteSelection(selection.id, selection.type);
+
+    if ("error" in routeResult) {
+      return NextResponse.json(
+        { message: routeResult.error.message },
+        { status: routeResult.error.status }
+      );
+    }
   }
 
   // 6. บันทึกค่าที่แก้ไข

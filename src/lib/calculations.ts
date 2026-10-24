@@ -24,6 +24,24 @@ export function calculateRouteCost(segments:TravelSegment[]) {
         return total + segment.cost
     },0)
 }
+
+export function calculateSelectedRoutesCost(
+  outboundRoute?: { segments: TravelSegment[] } | null,
+  returnRoute?: { segments: TravelSegment[] } | null
+): number | undefined {
+  const selectedRoutes = [outboundRoute, returnRoute].filter(
+    (route): route is { segments: TravelSegment[] } => Boolean(route)
+  );
+
+  if (selectedRoutes.length === 0) {
+    return undefined;
+  }
+
+  return selectedRoutes.reduce(
+    (total, route) => total + calculateRouteCost(route.segments),
+    0
+  );
+}
 // ฟั่งชั่นคำนวนค่าไปค่ากับรวมกันต่อวัน
 export function calculateDailyCost(outbound:TravelSegment[],returnRoute:TravelSegment[]):number {
     const outboundCost = calculateRouteCost(outbound)

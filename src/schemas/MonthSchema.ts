@@ -26,6 +26,8 @@ const offDatesSchema = z.array(
   )
 );
 
+const selectedRouteIdSchema = z.string().nullable();
+
 // ใช้ตอนสร้างเดือน
 export const MonthSchema = z.object({
   year: yearSchema,
@@ -33,6 +35,8 @@ export const MonthSchema = z.object({
   defaultDailyCost: dailyCostSchema,
   workDays: workDaysSchema.default([1, 2, 3, 4, 5]),
   offDates: offDatesSchema.default([]),
+  selectedOutboundRouteId: selectedRouteIdSchema.nullish(),
+  selectedReturnRouteId: selectedRouteIdSchema.nullish(),
 });
 
 // ใช้ตอนแก้การตั้งค่าของเดือนที่มีอยู่แล้ว
@@ -41,6 +45,8 @@ export const UpdateMonthSchema = z
     defaultDailyCost: dailyCostSchema.optional(),
     workDays: workDaysSchema.optional(),
     offDates: offDatesSchema.optional(),
+    selectedOutboundRouteId: selectedRouteIdSchema.optional(),
+    selectedReturnRouteId: selectedRouteIdSchema.optional(),
   })
   .refine(
     (data) => Object.keys(data).length > 0,

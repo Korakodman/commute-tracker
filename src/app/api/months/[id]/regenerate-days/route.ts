@@ -3,10 +3,15 @@ import { NextResponse } from "next/server";
 
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
+import TravelRoute from "@/app/Models/TravelRoute";
 import { connectDB } from "@/lib/db";
-import { calculateMonthlyCost } from "@/lib/calculations";
+import {
+  calculateMonthlyCost,
+  calculateSelectedRoutesCost,
+} from "@/lib/calculations";
 import { generateMonthDays } from "@/lib/calender";
 import { findInvalidOffDate } from "@/lib/month-validation";
+import { findValidatedRouteSelection } from "@/lib/route-selection";
 import { UpdateMonthSchema } from "@/schemas/MonthSchema";
 
 export async function POST(
@@ -26,6 +31,8 @@ export async function POST(
     defaultDailyCost: number;
     workDays: number[];
     offDates: string[];
+    selectedOutboundRouteId: string | null;
+    selectedReturnRouteId: string | null;
   }> = {};
   try {
     const bodyText = await request.text();
@@ -83,6 +90,42 @@ export async function POST(
           : month.offDates ?? [],
       };
 
+      const selectedOutboundRouteId =
+        "selectedOutboundRouteId" in requestedSettings
+          ? requestedSettings.selectedOutboundRouteId
+          : month.selectedOutboundRouteId?.toString() ?? null;
+      const selectedReturnRouteId =
+        "selectedReturnRouteId" in requestedSettings
+          ? requestedSettings.selectedReturnRouteId
+          : month.selectedReturnRouteId?.toString() ?? null;
+
+      const selectedRoutes: {
+        id: string | null | undefined;
+        expectedType: "OUTBOUND" | "RETURN";
+      }[] = [
+        { id: selectedOutboundRouteId, expectedType: "OUTBOUND" },
+        { id: selectedReturnRouteId, expectedType: "RETURN" },
+      ];
+      const routeDocuments: Array<InstanceType<typeof TravelRoute> | null> = [];
+
+      for (const selection of selectedRoutes) {
+        const selectionResult = await findValidatedRouteSelection(
+          selection.id,
+          selection.expectedType,
+          session
+        );
+
+        if ("error" in selectionResult) {
+          await session.abortTransaction();
+          return NextResponse.json(
+            { message: selectionResult.error.message },
+            { status: selectionResult.error.status }
+          );
+        }
+
+        routeDocuments.push(selectionResult.route);
+      }
+
       const invalidOffDate = findInvalidOffDate(
         nextSettings.offDates,
         month.year,
@@ -100,7 +143,11 @@ export async function POST(
         );
       }
 
-      const updatedMonth = await Month.findByIdAndUpdate(id, nextSettings, {
+      const settingsToSave: Record<string, unknown> = nextSettings;
+      settingsToSave.selectedOutboundRouteId = selectedOutboundRouteId;
+      settingsToSave.selectedReturnRouteId = selectedReturnRouteId;
+
+      const updatedMonth = await Month.findByIdAndUpdate(id, settingsToSave, {
         returnDocument: "after",
         runValidators: true,
         session,
@@ -110,12 +157,16 @@ export async function POST(
         throw new Error("Month disappeared during transaction");
       }
 
+      const routeDailyCost =
+        calculateSelectedRoutesCost(routeDocuments[0], routeDocuments[1]) ??
+        updatedMonth.defaultDailyCost;
+
       const calendarDays = generateMonthDays(
         updatedMonth.year,
         updatedMonth.month,
         updatedMonth.workDays,
         updatedMonth.offDates,
-        updatedMonth.defaultDailyCost
+        routeDailyCost
       );
 
       const travelDays = calendarDays.map((day) => ({

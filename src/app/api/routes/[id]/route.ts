@@ -1,6 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { NextResponse } from "next/server";
 import TravelRoute from "@/app/Models/TravelRoute";
+import Month from "@/app/Models/Month";
 import { TravelRouteSchema } from "@/schemas/TravelRouteSchema";
 import mongoose from "mongoose";
 
@@ -80,6 +81,20 @@ export async function DELETE(
 
   try {
     await connectDB();
+    const usingMonth = await Month.findOne({
+      $or: [
+        { selectedOutboundRouteId: id },
+        { selectedReturnRouteId: id },
+      ],
+    });
+
+    if (usingMonth) {
+      return NextResponse.json(
+        { message: "ไม่สามารถลบ Route ที่ถูกเลือกใช้งานในเดือนอยู่ได้" },
+        { status: 409 }
+      );
+    }
+
     const deletedRoute = await TravelRoute.findByIdAndDelete(id);
 
     if (!deletedRoute) {

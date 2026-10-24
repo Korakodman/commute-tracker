@@ -7,7 +7,9 @@ interface Month{
     month:number,
     defaultDailyCost:number,
     workDays:number[],
-    offDates:string[]
+    offDates:string[],
+    selectedOutboundRouteId?:mongoose.Types.ObjectId | null,
+    selectedReturnRouteId?:mongoose.Types.ObjectId | null,
 }
 
 const MonthSchema = new Schema<Month>({
@@ -39,7 +41,17 @@ const MonthSchema = new Schema<Month>({
         type:[String],
         required:true,
         default:()=>[],
-    }
+    },
+    selectedOutboundRouteId:{
+        type:Schema.Types.ObjectId,
+        ref:"TravelRoute",
+        default:null,
+    },
+    selectedReturnRouteId:{
+        type:Schema.Types.ObjectId,
+        ref:"TravelRoute",
+        default:null,
+    },
 })
 
 

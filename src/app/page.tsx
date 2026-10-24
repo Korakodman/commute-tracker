@@ -20,7 +20,10 @@ import {
   LayoutDashboard,
   Eye,
 } from "lucide-react";
-import { calculateRouteCost } from "@/lib/calculations";
+import {
+  calculateRouteCost,
+  calculateSelectedRoutesCost,
+} from "@/lib/calculations";
 interface MonthItem {
   _id: string;
   year: number;
@@ -28,6 +31,8 @@ interface MonthItem {
   defaultDailyCost: number;
   workDays?: number[];
   offDates?: string[];
+  selectedOutboundRouteId?: string | null;
+  selectedReturnRouteId?: string | null;
 }
 
 interface TravelDay {
@@ -64,6 +69,8 @@ interface MonthSettingsPayload {
   defaultDailyCost: number;
   workDays: number[];
   offDates: string[];
+  selectedOutboundRouteId: string | null;
+  selectedReturnRouteId: string | null;
 }
 
 interface TravelRouteSegment {
@@ -191,6 +198,8 @@ const [showSettings, setShowSettings] = useState(false);
 const [settingsDailyCost, setSettingsDailyCost] = useState<number | "">(0);
 const [settingsWorkDays, setSettingsWorkDays] = useState<number[]>([]);
 const [settingsOffDates, setSettingsOffDates] = useState<string[]>([]);
+const [settingsOutboundRouteId, setSettingsOutboundRouteId] = useState<string | null>(null);
+const [settingsReturnRouteId, setSettingsReturnRouteId] = useState<string | null>(null);
 const [settingsOffDateInput, setSettingsOffDateInput] = useState("");
 const [settingsError, setSettingsError] = useState("");
 const [settingsSuccess, setSettingsSuccess] = useState("");
@@ -482,6 +491,16 @@ const routesByType = useMemo(
         : history.filter((item) => item.year === Number(historyYear)),
     [history, historyYear]
   );
+  const selectedSettingsOutboundRoute = routes.find(
+    (route) => route._id === settingsOutboundRouteId && route.type === "OUTBOUND"
+  );
+  const selectedSettingsReturnRoute = routes.find(
+    (route) => route._id === settingsReturnRouteId && route.type === "RETURN"
+  );
+  const settingsRouteCost = calculateSelectedRoutesCost(
+    selectedSettingsOutboundRoute,
+    selectedSettingsReturnRoute
+  );
 
   function openSettings() {
     if (!selectedMonth) return;
@@ -489,6 +508,8 @@ const routesByType = useMemo(
     setSettingsDailyCost(selectedMonth.defaultDailyCost);
     setSettingsWorkDays([...(selectedMonth.workDays ?? [])]);
     setSettingsOffDates([...(selectedMonth.offDates ?? [])]);
+    setSettingsOutboundRouteId(selectedMonth.selectedOutboundRouteId ?? null);
+    setSettingsReturnRouteId(selectedMonth.selectedReturnRouteId ?? null);
     setSettingsOffDateInput("");
     setSettingsError("");
     setSettingsSuccess("");
@@ -606,6 +627,8 @@ const routesByType = useMemo(
       defaultDailyCost: dailyCost,
       workDays: [...settingsWorkDays].sort((a, b) => a - b),
       offDates: [...settingsOffDates].sort(),
+      selectedOutboundRouteId: settingsOutboundRouteId,
+      selectedReturnRouteId: settingsReturnRouteId,
     };
 
     setPendingSettingsPayload(payload);
@@ -643,6 +666,12 @@ const routesByType = useMemo(
       setSettingsDailyCost(refreshedData.month.defaultDailyCost);
       setSettingsWorkDays([...(refreshedData.month.workDays ?? [])]);
       setSettingsOffDates([...(refreshedData.month.offDates ?? [])]);
+      setSettingsOutboundRouteId(
+        refreshedData.month.selectedOutboundRouteId ?? null
+      );
+      setSettingsReturnRouteId(
+        refreshedData.month.selectedReturnRouteId ?? null
+      );
       setSettingsOffDateInput("");
       setShowSettings(false);
       setSettingsSuccess("บันทึกการตั้งค่าสำเร็จ");
@@ -1605,6 +1634,60 @@ async function handleCreateMonth(
               >
                 <X size={18} />
               </button>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-2 text-sm text-zinc-300">
+                Route ขาไป (OUTBOUND)
+                <select
+                  value={settingsOutboundRouteId ?? ""}
+                  onChange={(event) =>
+                    setSettingsOutboundRouteId(event.target.value || null)
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                >
+                  <option value="">ไม่ใช้ Route ขาไป</option>
+                  {routes
+                    .filter((route) => route.type === "OUTBOUND")
+                    .map((route) => (
+                      <option key={route._id} value={route._id}>
+                        {route.name} ({formatMoney(calculateRouteCost(route.segments))})
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="space-y-2 text-sm text-zinc-300">
+                Route ขากลับ (RETURN)
+                <select
+                  value={settingsReturnRouteId ?? ""}
+                  onChange={(event) =>
+                    setSettingsReturnRouteId(event.target.value || null)
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                >
+                  <option value="">ไม่ใช้ Route ขากลับ</option>
+                  {routes
+                    .filter((route) => route.type === "RETURN")
+                    .map((route) => (
+                      <option key={route._id} value={route._id}>
+                        {route.name} ({formatMoney(calculateRouteCost(route.segments))})
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="rounded-xl border border-pink-500/20 bg-pink-500/[0.06] p-4 text-sm">
+              <p className="text-zinc-400">ค่าเริ่มต้นของวัน WORK</p>
+              <p className="mt-1 text-xl font-semibold text-pink-300">
+                {formatMoney(settingsRouteCost ?? (Number(settingsDailyCost) || 0))}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {settingsRouteCost === undefined
+                  ? "ยังไม่ได้เลือก Route ใช้ค่าเดินทางเริ่มต้นของเดือน"
+                  : "คำนวณจาก Route ที่เลือกเท่านั้น"}
+              </p>
             </div>
 
             <label className="block max-w-sm space-y-2 text-sm text-zinc-300">
