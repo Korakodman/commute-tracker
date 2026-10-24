@@ -18,12 +18,18 @@ import {
   X,
   History,
   LayoutDashboard,
-  Eye,
 } from "lucide-react";
 import {
   calculateRouteCost,
   calculateSelectedRoutesCost,
 } from "@/lib/calculations";
+import TravelRouteManager, {
+  type TravelRoute,
+  type TravelRouteForm,
+} from "@/components/commute/TravelRouteManager";
+import MonthlyHistory, {
+  type MonthlyHistoryItem,
+} from "@/components/commute/MonthlyHistory";
 interface MonthItem {
   _id: string;
   year: number;
@@ -55,41 +61,12 @@ interface MonthDetail {
   };
 }
 
-interface MonthlyHistoryItem {
-  year: number;
-  month: number;
-  totalDays: number;
-  workDays: number;
-  offDays: number;
-  totalCost: number;
-  hasCalendar: boolean;
-}
-
 interface MonthSettingsPayload {
   defaultDailyCost: number;
   workDays: number[];
   offDates: string[];
   selectedOutboundRouteId: string | null;
   selectedReturnRouteId: string | null;
-}
-
-interface TravelRouteSegment {
-  _id?: string;
-  name: string;
-  cost: number;
-}
-
-interface TravelRoute {
-  _id: string;
-  name: string;
-  type: "OUTBOUND" | "RETURN";
-  segments: TravelRouteSegment[];
-}
-
-interface TravelRouteForm {
-  name: string;
-  type: TravelRoute["type"];
-  segments: Array<Pick<TravelRouteSegment, "name"> & { cost: number | "" }>;
 }
 
 const weekdayLabels = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
@@ -1191,157 +1168,31 @@ async function handleCreateMonth(
         </header>
 
         {viewMode === "history" ? (
-          <section className="space-y-6">
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-              <div>
-                <p className="mb-2 text-sm text-pink-400">MONTHLY HISTORY</p>
-                <h2 className="text-3xl font-bold sm:text-4xl">
-                  ประวัติค่าเดินทาง
-                </h2>
-                <p className="mt-2 text-sm text-zinc-500">
-                  ดูสรุปค่าเดินทางย้อนหลังจากข้อมูลจริงในระบบ
-                </p>
-              </div>
+          <MonthlyHistory
+            history={history}
+            historyLoading={historyLoading}
+            historyError={historyError}
+            historyYear={historyYear}
+            historyYears={historyYears}
+            filteredHistory={filteredHistory}
+            months={months}
+            onHistoryYearChange={setHistoryYear}
+            onOpenCalendar={(monthId) => {
+              const isSameMonth = monthId === selectedMonthId;
 
-              {historyYears.length > 0 && (
-                <label className="flex items-center gap-3 text-sm text-zinc-400">
-                  ปี
-                  <select
-                    value={historyYear}
-                    onChange={(event) => setHistoryYear(event.target.value)}
-                    className="min-w-36 rounded-xl border border-white/10 bg-[#181820] px-4 py-3 text-sm text-white outline-none transition focus:border-pink-500"
-                  >
-                    <option value="all">ทั้งหมด</option>
-                    {historyYears.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
+              setSelectedDay(null);
+              setIsEditingDay(false);
+              setShowSettings(false);
+              setEditDaySuccess("");
+              setViewMode("dashboard");
 
-            {historyError && (
-              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
-                {historyError}
-              </div>
-            )}
-
-            {historyLoading && (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center text-sm text-zinc-400">
-                กำลังโหลดประวัติรายเดือน...
-              </div>
-            )}
-
-            {!historyLoading && !historyError && history.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center">
-                <History className="mx-auto mb-3 text-pink-400" size={34} />
-                <h3 className="font-semibold">ยังไม่มีประวัติรายเดือน</h3>
-                <p className="mt-2 text-sm text-zinc-500">
-                  สร้างเดือนและปฏิทินก่อน แล้วประวัติจะแสดงตรงนี้
-                </p>
-              </div>
-            )}
-
-            {!historyLoading && !historyError && history.length > 0 && filteredHistory.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center text-sm text-zinc-500">
-                ไม่พบประวัติของปีที่เลือก
-              </div>
-            )}
-
-            {!historyLoading && !historyError && filteredHistory.length > 0 && (
-              <div className="grid gap-4 lg:grid-cols-2">
-                {filteredHistory.map((item) => {
-                  const matchingMonth = months.find(
-                    (month) =>
-                      month.year === item.year && month.month === item.month
-                  );
-                  const canOpenCalendar = item.hasCalendar && Boolean(matchingMonth);
-
-                  return (
-                    <article
-                      key={`${item.year}-${item.month}`}
-                      className="rounded-2xl border border-white/10 bg-[#13131B] p-5 transition hover:border-pink-500/30 sm:p-6"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold tracking-[0.18em] text-pink-400">
-                            MONTH
-                          </p>
-                          <h3 className="mt-2 text-xl font-bold text-white">
-                            {formatMonth(item.year, item.month)}
-                          </h3>
-                        </div>
-                        <span
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                            item.hasCalendar
-                              ? "bg-pink-500/15 text-pink-300"
-                              : "bg-zinc-700/40 text-zinc-400"
-                          }`}
-                        >
-                          {item.hasCalendar ? "มีปฏิทินแล้ว" : "ยังไม่มีปฏิทิน"}
-                        </span>
-                      </div>
-
-                      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-                          <p className="text-xs text-zinc-500">ทั้งหมด</p>
-                          <p className="mt-2 font-semibold text-white">{item.totalDays} วัน</p>
-                        </div>
-                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-                          <p className="text-xs text-zinc-500">วันทำงาน</p>
-                          <p className="mt-2 font-semibold text-pink-300">{item.workDays} วัน</p>
-                        </div>
-                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-                          <p className="text-xs text-zinc-500">วันหยุด</p>
-                          <p className="mt-2 font-semibold text-zinc-300">{item.offDays} วัน</p>
-                        </div>
-                        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-                          <p className="text-xs text-zinc-500">รวม</p>
-                          <p className="mt-2 font-semibold text-white">{formatMoney(item.totalCost)}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex justify-end">
-                        {canOpenCalendar ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!matchingMonth) return;
-
-                              const isSameMonth =
-                                matchingMonth._id === selectedMonthId;
-
-                              setSelectedDay(null);
-                              setIsEditingDay(false);
-                              setShowSettings(false);
-                              setEditDaySuccess("");
-                              setViewMode("dashboard");
-
-                              if (isSameMonth) {
-                                setReloadKey((current) => current + 1);
-                              } else {
-                                setSelectedMonthId(matchingMonth._id);
-                              }
-                            }}
-                            className="flex items-center gap-2 rounded-xl border border-pink-500/30 px-4 py-2.5 text-sm font-semibold text-pink-300 transition hover:bg-pink-500/10"
-                          >
-                            <Eye size={16} />
-                            ดูปฏิทิน
-                          </button>
-                        ) : (
-                          <span className="text-sm text-zinc-600">
-                            ยังไม่มีข้อมูลวันเดินทาง
-                          </span>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+              if (isSameMonth) {
+                setReloadKey((current) => current + 1);
+              } else {
+                setSelectedMonthId(monthId);
+              }
+            }}
+          />
         ) : (
         <>
         {/* Title and month selector */}
@@ -1984,299 +1835,44 @@ async function handleCreateMonth(
               />
             </section>
 
-            {/* Travel Routes */}
-            <section className="space-y-5 rounded-2xl border border-white/10 bg-[#13131B] p-5 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-pink-400">TRAVEL ROUTES</p>
-                  <h3 className="mt-1 text-xl font-bold text-white">เส้นทางการเดินทาง</h3>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    จัดการเส้นทางไปและกลับหลายรายการได้ตามต้องการ
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openCreateRouteForm}
-                  className="flex items-center gap-2 rounded-xl bg-pink-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-pink-400"
-                >
-                  <Plus size={16} />
-                  เพิ่ม Route
-                </button>
-              </div>
-
-              {routesError && (
-                <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
-                  {routesError}
-                </p>
-              )}
-
-              {routeFormSuccess && !showRouteForm && (
-                <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">
-                  {routeFormSuccess}
-                </p>
-              )}
-
-              {routesLoading ? (
-                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-zinc-400">
-                  กำลังโหลด Route...
-                </div>
-              ) : routes.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/15 p-8 text-center text-sm text-zinc-500">
-                  ยังไม่มี Route ในระบบ
-                </div>
-              ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {(["OUTBOUND", "RETURN"] as const).map((type) => (
-                    <div key={type} className="space-y-3">
-                      <h4 className="text-sm font-semibold text-zinc-300">
-                        {type === "OUTBOUND" ? "ขาไป (OUTBOUND)" : "ขากลับ (RETURN)"}
-                      </h4>
-                      {routesByType[type].length === 0 ? (
-                        <p className="rounded-xl border border-white/[0.08] p-4 text-sm text-zinc-600">
-                          ยังไม่มี Route ประเภทนี้
-                        </p>
-                      ) : (
-                        routesByType[type].map((route) => (
-                          <article
-                            key={route._id}
-                            className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <h5 className="font-semibold text-white">{route.name}</h5>
-                                <p className="mt-1 text-xs text-pink-300">{route.type}</p>
-                              </div>
-                              <p className="text-right text-sm font-semibold text-pink-300">
-                                {formatMoney(calculateRouteCost(route.segments))}
-                                <span className="block text-xs font-normal text-zinc-500">รวม</span>
-                              </p>
-                            </div>
-
-                            <div className="mt-4 space-y-2">
-                              {route.segments.map((segment, index) => (
-                                <div
-                                  key={segment._id ?? `${route._id}-${index}`}
-                                  className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-[#0C0C12] px-3 py-2 text-sm"
-                                >
-                                  <span className="min-w-0 truncate text-zinc-300">
-                                    {segment.name}
-                                  </span>
-                                  <span className="shrink-0 text-zinc-400">
-                                    {formatMoney(segment.cost)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="mt-4 flex justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditRouteForm(route)}
-                                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-                              >
-                                แก้ไข
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRouteDeleteError("");
-                                  setRouteToDelete(route);
-                                }}
-                                className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 transition hover:bg-red-500/10"
-                              >
-                                ลบ
-                              </button>
-                            </div>
-                          </article>
-                        ))
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {showRouteForm && (
-                <form
-                  onSubmit={handleRouteSubmit}
-                  className="space-y-5 rounded-xl border border-pink-500/20 bg-[#15151D] p-4 sm:p-5"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-pink-400">{editingRouteId ? "EDIT ROUTE" : "NEW ROUTE"}</p>
-                      <h4 className="mt-1 font-semibold text-white">
-                        {editingRouteId ? "แก้ไขเส้นทาง" : "สร้างเส้นทางใหม่"}
-                      </h4>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowRouteForm(false);
-                        setRouteFormError("");
-                      }}
-                      className="rounded-lg p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
-                      aria-label="ปิดฟอร์ม Route"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-2 text-sm text-zinc-300">
-                      ชื่อ Route
-                      <input
-                        type="text"
-                        value={routeForm.name}
-                        onChange={(event) =>
-                          setRouteForm((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        placeholder="เช่น บ้าน → ที่ทำงาน"
-                        className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm text-zinc-300">
-                      ประเภท Route
-                      <select
-                        value={routeForm.type}
-                        onChange={(event) =>
-                          setRouteForm((current) => ({
-                            ...current,
-                            type: event.target.value as TravelRoute["type"],
-                          }))
-                        }
-                        className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
-                      >
-                        <option value="OUTBOUND">OUTBOUND (ขาไป)</option>
-                        <option value="RETURN">RETURN (ขากลับ)</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h5 className="font-semibold text-white">Segments</h5>
-                        <p className="mt-1 text-xs text-zinc-500">ต้องมีอย่างน้อย 1 รายการ</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={addRouteSegment}
-                        className="rounded-lg border border-pink-500/30 px-3 py-2 text-xs text-pink-300 transition hover:bg-pink-500/10"
-                      >
-                        เพิ่ม Segment
-                      </button>
-                    </div>
-
-                    {routeForm.segments.map((segment, index) => (
-                      <div key={index} className="grid gap-2 sm:grid-cols-[1fr_150px_auto]">
-                        <input
-                          type="text"
-                          value={segment.name}
-                          onChange={(event) => updateRouteSegment(index, "name", event.target.value)}
-                          placeholder="เช่น บ้าน → BTS"
-                          aria-label={`ชื่อ Segment ${index + 1}`}
-                          className="rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-sm text-white outline-none focus:border-pink-500"
-                        />
-                        <input
-                          type="number"
-                          min={0}
-                          step="1"
-                          value={segment.cost}
-                          onChange={(event) => updateRouteSegment(index, "cost", event.target.value)}
-                          placeholder="200"
-                          aria-label={`ค่าใช้จ่าย Segment ${index + 1}`}
-                          className={numberInputClass}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeRouteSegment(index)}
-                          disabled={routeForm.segments.length <= 1}
-                          className="rounded-xl border border-white/10 px-3 py-3 text-zinc-400 transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-30"
-                          aria-label={`ลบ Segment ${index + 1}`}
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {routeFormError && (
-                    <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
-                      {routeFormError}
-                    </p>
-                  )}
-
-                  <div className="flex justify-end gap-2 border-t border-white/[0.07] pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowRouteForm(false)}
-                      disabled={isSavingRoute}
-                      className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:opacity-50"
-                    >
-                      ยกเลิก
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingRoute}
-                      className="rounded-xl bg-pink-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isSavingRoute ? "กำลังบันทึก..." : "บันทึก Route"}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </section>
-
-            {routeToDelete && (
-              <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-                role="presentation"
-                onMouseDown={(event) => {
-                  if (event.target === event.currentTarget && !isDeletingRoute) {
-                    setRouteToDelete(null);
-                  }
-                }}
-              >
-                <section
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="delete-route-title"
-                  className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#15151D] p-6 shadow-2xl"
-                >
-                  <h3 id="delete-route-title" className="text-lg font-semibold text-white">
-                    ยืนยันการลบ Route
-                  </h3>
-                  <p className="mt-3 text-sm leading-6 text-zinc-300">
-                    ต้องการลบ Route <span className="font-semibold text-pink-300">{routeToDelete.name}</span> หรือไม่
-                  </p>
-                  {routeDeleteError && (
-                    <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
-                      {routeDeleteError}
-                    </p>
-                  )}
-                  <div className="mt-6 flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRouteToDelete(null)}
-                      disabled={isDeletingRoute}
-                      className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:opacity-50"
-                    >
-                      ยกเลิก
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmDeleteRoute}
-                      disabled={isDeletingRoute}
-                      className="rounded-xl bg-red-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isDeletingRoute ? "กำลังลบ..." : "ลบ Route"}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            )}
+            <TravelRouteManager
+              routes={routes}
+              routesByType={routesByType}
+              routesLoading={routesLoading}
+              routesError={routesError}
+              routeFormSuccess={routeFormSuccess}
+              showRouteForm={showRouteForm}
+              editingRouteId={editingRouteId}
+              routeForm={routeForm}
+              routeFormError={routeFormError}
+              isSavingRoute={isSavingRoute}
+              routeToDelete={routeToDelete}
+              isDeletingRoute={isDeletingRoute}
+              routeDeleteError={routeDeleteError}
+              numberInputClass={numberInputClass}
+              onCreateRoute={openCreateRouteForm}
+              onEditRoute={openEditRouteForm}
+              onRequestDelete={(route) => {
+                setRouteDeleteError("");
+                setRouteToDelete(route);
+              }}
+              onSubmit={handleRouteSubmit}
+              onCloseForm={() => {
+                setShowRouteForm(false);
+                setRouteFormError("");
+              }}
+              onRouteNameChange={(name) =>
+                setRouteForm((current) => ({ ...current, name }))
+              }
+              onRouteTypeChange={(type) =>
+                setRouteForm((current) => ({ ...current, type }))
+              }
+              onAddSegment={addRouteSegment}
+              onUpdateSegment={updateRouteSegment}
+              onRemoveSegment={removeRouteSegment}
+              onCloseDelete={() => setRouteToDelete(null)}
+              onConfirmDelete={handleConfirmDeleteRoute}
+            />
 
             {/* Calendar */}
             <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#13131B]">
