@@ -135,8 +135,11 @@ async function readJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-async function fetchMonthDetail(monthId: string): Promise<MonthDetail> {
-  const response = await fetch(`/api/months/${monthId}`);
+async function fetchMonthDetail(
+  monthId: string,
+  signal?: AbortSignal
+): Promise<MonthDetail> {
+  const response = await fetch(`/api/months/${monthId}`, { signal });
   const payload = await readJson<MonthDetail & { message?: string }>(
     response
   );
@@ -353,6 +356,7 @@ const routesByType = useMemo(
     if (!selectedMonthId) return;
 
     let active = true;
+    const controller = new AbortController();
 
     async function loadMonth() {
       setLoading(true);
@@ -360,11 +364,11 @@ const routesByType = useMemo(
       setData(null);
 
       try {
-        const result = await fetchMonthDetail(selectedMonthId);
+        const result = await fetchMonthDetail(selectedMonthId, controller.signal);
 
         if (active) setData(result);
       } catch (err) {
-        if (active) {
+        if (active && !controller.signal.aborted) {
           setError(
             err instanceof Error
               ? err.message
@@ -380,6 +384,7 @@ const routesByType = useMemo(
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [selectedMonthId, reloadKey]);
 
@@ -1305,15 +1310,20 @@ async function handleCreateMonth(
                             onClick={() => {
                               if (!matchingMonth) return;
 
+                              const isSameMonth =
+                                matchingMonth._id === selectedMonthId;
+
                               setSelectedDay(null);
                               setIsEditingDay(false);
                               setShowSettings(false);
                               setEditDaySuccess("");
-                              setData(null);
-                              setLoading(true);
-                              setError("");
-                              setSelectedMonthId(matchingMonth._id);
                               setViewMode("dashboard");
+
+                              if (isSameMonth) {
+                                setReloadKey((current) => current + 1);
+                              } else {
+                                setSelectedMonthId(matchingMonth._id);
+                              }
                             }}
                             className="flex items-center gap-2 rounded-xl border border-pink-500/30 px-4 py-2.5 text-sm font-semibold text-pink-300 transition hover:bg-pink-500/10"
                           >
