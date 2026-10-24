@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import type { FormEvent } from "react";
 
 import { calculateRouteCost } from "@/lib/calculations";
-import type { TravelRoute } from "@/components/commute/TravelRouteManager";
+import type { TravelRoute } from "@/lib/route-types";
 
 export interface MonthSettingsMonth {
   year: number;

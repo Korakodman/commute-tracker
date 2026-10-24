@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -38,10 +37,9 @@ import CalendarSection, {
 } from "@/components/commute/CalendarSection";
 import DayDetailPanel from "@/components/commute/DayDetailPanel";
 import CreateMonthForm from "@/components/commute/CreateMonthForm";
-import TravelRouteManager, {
-  type TravelRoute,
-  type TravelRouteForm,
-} from "@/components/commute/TravelRouteManager";
+import { useTravelRoutes } from "@/hooks/useTravelRoutes";
+import TravelRouteManager from "@/components/commute/TravelRouteManager";
+import type { TravelRoute, TravelRouteForm } from "@/lib/route-types";
 import MonthlyHistory, {
   type MonthlyHistoryItem,
 } from "@/components/commute/MonthlyHistory";
@@ -177,9 +175,6 @@ const [createWorkDays, setCreateWorkDays] = useState<number[]>([
 const [createOffDates, setCreateOffDates] = useState<string[]>([]);
 const [offDateInput, setOffDateInput] = useState("");
 
-const [routes, setRoutes] = useState<TravelRoute[]>([]);
-const [routesLoading, setRoutesLoading] = useState(true);
-const [routesError, setRoutesError] = useState("");
 const [showRouteForm, setShowRouteForm] = useState(false);
 const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
 const [routeForm, setRouteForm] = useState<TravelRouteForm>({
@@ -194,49 +189,13 @@ const [routeToDelete, setRouteToDelete] = useState<TravelRoute | null>(null);
 const [isDeletingRoute, setIsDeletingRoute] = useState(false);
 const [routeDeleteError, setRouteDeleteError] = useState("");
 
-const routesByType = useMemo(
-  () => ({
-    OUTBOUND: routes.filter((route) => route.type === "OUTBOUND"),
-    RETURN: routes.filter((route) => route.type === "RETURN"),
-  }),
-  [routes]
-);
-
-  const loadRoutes = useCallback(async function loadRoutes(): Promise<boolean> {
-    setRoutesLoading(true);
-    setRoutesError("");
-
-    try {
-      const response = await fetch("/api/routes");
-      const payload = await readJson<{ Routes?: TravelRoute[]; message?: string }>(
-        response
-      );
-
-      if (!response.ok || !payload?.Routes) {
-        throw new Error(payload?.message ?? "โหลดรายการ Route ไม่สำเร็จ");
-      }
-
-      setRoutes(payload.Routes);
-      return true;
-    } catch (routeError) {
-      setRoutesError(
-        routeError instanceof Error
-          ? routeError.message
-          : "เกิดข้อผิดพลาดในการโหลด Route"
-      );
-      return false;
-    } finally {
-      setRoutesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadRoutes();
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [loadRoutes]);
+  const {
+    routes,
+    routesByType,
+    routesLoading,
+    routesError,
+    loadRoutes,
+  } = useTravelRoutes();
 
 
 
