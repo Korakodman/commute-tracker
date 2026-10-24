@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -19,6 +20,7 @@ import {
   LayoutDashboard,
   Eye,
 } from "lucide-react";
+import { calculateRouteCost } from "@/lib/calculations";
 interface MonthItem {
   _id: string;
   year: number;
@@ -62,6 +64,25 @@ interface MonthSettingsPayload {
   defaultDailyCost: number;
   workDays: number[];
   offDates: string[];
+}
+
+interface TravelRouteSegment {
+  _id?: string;
+  name: string;
+  cost: number;
+}
+
+interface TravelRoute {
+  _id: string;
+  name: string;
+  type: "OUTBOUND" | "RETURN";
+  segments: TravelRouteSegment[];
+}
+
+interface TravelRouteForm {
+  name: string;
+  type: TravelRoute["type"];
+  segments: Array<Pick<TravelRouteSegment, "name"> & { cost: number | "" }>;
 }
 
 const weekdayLabels = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
@@ -198,6 +219,67 @@ const [createWorkDays, setCreateWorkDays] = useState<number[]>([
 
 const [createOffDates, setCreateOffDates] = useState<string[]>([]);
 const [offDateInput, setOffDateInput] = useState("");
+
+const [routes, setRoutes] = useState<TravelRoute[]>([]);
+const [routesLoading, setRoutesLoading] = useState(true);
+const [routesError, setRoutesError] = useState("");
+const [showRouteForm, setShowRouteForm] = useState(false);
+const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
+const [routeForm, setRouteForm] = useState<TravelRouteForm>({
+  name: "",
+  type: "OUTBOUND",
+  segments: [{ name: "", cost: "" }],
+});
+const [routeFormError, setRouteFormError] = useState("");
+const [routeFormSuccess, setRouteFormSuccess] = useState("");
+const [isSavingRoute, setIsSavingRoute] = useState(false);
+const [routeToDelete, setRouteToDelete] = useState<TravelRoute | null>(null);
+const [isDeletingRoute, setIsDeletingRoute] = useState(false);
+const [routeDeleteError, setRouteDeleteError] = useState("");
+
+const routesByType = useMemo(
+  () => ({
+    OUTBOUND: routes.filter((route) => route.type === "OUTBOUND"),
+    RETURN: routes.filter((route) => route.type === "RETURN"),
+  }),
+  [routes]
+);
+
+  const loadRoutes = useCallback(async function loadRoutes(): Promise<boolean> {
+    setRoutesLoading(true);
+    setRoutesError("");
+
+    try {
+      const response = await fetch("/api/routes");
+      const payload = await readJson<{ Routes?: TravelRoute[]; message?: string }>(
+        response
+      );
+
+      if (!response.ok || !payload?.Routes) {
+        throw new Error(payload?.message ?? "โหลดรายการ Route ไม่สำเร็จ");
+      }
+
+      setRoutes(payload.Routes);
+      return true;
+    } catch (routeError) {
+      setRoutesError(
+        routeError instanceof Error
+          ? routeError.message
+          : "เกิดข้อผิดพลาดในการโหลด Route"
+      );
+      return false;
+    } finally {
+      setRoutesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadRoutes();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadRoutes]);
 
 
 
@@ -537,32 +619,21 @@ const [offDateInput, setOffDateInput] = useState("");
     setSettingsError("");
 
     try {
-      const response = await fetch(`/api/months/${selectedMonthId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(pendingSettingsPayload),
-      });
+      const response = await fetch(
+        `/api/months/${selectedMonthId}/regenerate-days`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(pendingSettingsPayload),
+        }
+      );
       const responsePayload = await readJson<{ message?: string }>(response);
 
       if (!response.ok) {
         throw new Error(
           responsePayload?.message ?? "บันทึกการตั้งค่าไม่สำเร็จ"
-        );
-      }
-
-      const regenerateResponse = await fetch(
-        `/api/months/${selectedMonthId}/regenerate-days`,
-        { method: "POST" }
-      );
-      const regeneratePayload = await readJson<{ message?: string }>(
-        regenerateResponse
-      );
-
-      if (!regenerateResponse.ok) {
-        throw new Error(
-          regeneratePayload?.message ?? "สร้างปฏิทินใหม่ไม่สำเร็จ"
         );
       }
 
@@ -825,6 +896,171 @@ async function handleCreateMonth(
     setIsCreatingMonth(false);
   }
 }
+
+  function resetRouteForm() {
+    setRouteForm({
+      name: "",
+      type: "OUTBOUND",
+      segments: [{ name: "", cost: "" }],
+    });
+    setEditingRouteId(null);
+    setRouteFormError("");
+  }
+
+  function openCreateRouteForm() {
+    resetRouteForm();
+    setRouteFormSuccess("");
+    setShowRouteForm(true);
+  }
+
+  function openEditRouteForm(route: TravelRoute) {
+    setEditingRouteId(route._id);
+    setRouteForm({
+      name: route.name,
+      type: route.type,
+      segments: route.segments.map((segment) => ({
+        name: segment.name,
+        cost: segment.cost,
+      })),
+    });
+    setRouteFormError("");
+    setRouteFormSuccess("");
+    setShowRouteForm(true);
+  }
+
+  function updateRouteSegment(index: number, field: "name" | "cost", value: string) {
+    setRouteForm((current) => ({
+      ...current,
+      segments: current.segments.map((segment, segmentIndex) =>
+        segmentIndex === index
+          ? {
+              ...segment,
+              [field]: field === "cost" ? (value === "" ? "" : Number(value)) : value,
+            }
+          : segment
+      ),
+    }));
+  }
+
+  function addRouteSegment() {
+    setRouteForm((current) => ({
+      ...current,
+      segments: [...current.segments, { name: "", cost: "" }],
+    }));
+  }
+
+  function removeRouteSegment(index: number) {
+    setRouteForm((current) => ({
+      ...current,
+      segments: current.segments.filter((_, segmentIndex) => segmentIndex !== index),
+    }));
+  }
+
+  async function handleRouteSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRouteFormError("");
+    setRouteFormSuccess("");
+
+    const name = routeForm.name.trim();
+    const segments = routeForm.segments.map((segment) => ({
+      name: segment.name.trim(),
+      cost: segment.cost,
+    }));
+
+    if (!name) {
+      setRouteFormError("กรุณาระบุชื่อ Route");
+      return;
+    }
+    if (segments.length === 0) {
+      setRouteFormError("ต้องมีอย่างน้อย 1 Segment");
+      return;
+    }
+    if (segments.some((segment) => !segment.name)) {
+      setRouteFormError("กรุณาระบุชื่อของทุก Segment");
+      return;
+    }
+    if (
+      segments.some(
+        (segment) =>
+          typeof segment.cost !== "number" ||
+          !Number.isFinite(segment.cost) ||
+          segment.cost < 0
+      )
+    ) {
+      setRouteFormError("ค่าใช้จ่ายต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป");
+      return;
+    }
+
+    const payload = {
+      name,
+      type: routeForm.type,
+      segments: segments.map((segment) => ({
+        name: segment.name,
+        cost: Number(segment.cost),
+      })),
+    };
+
+    setIsSavingRoute(true);
+    try {
+      const response = await fetch(
+        editingRouteId ? `/api/routes/${editingRouteId}` : "/api/routes",
+        {
+          method: editingRouteId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const responsePayload = await readJson<{ message?: string }>(response);
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "บันทึก Route ไม่สำเร็จ");
+      }
+
+      const routesReloaded = await loadRoutes();
+      if (!routesReloaded) {
+        throw new Error("บันทึก Route แล้ว แต่โหลดรายการล่าสุดไม่สำเร็จ");
+      }
+      setShowRouteForm(false);
+      setRouteFormSuccess(editingRouteId ? "แก้ไข Route สำเร็จ" : "สร้าง Route สำเร็จ");
+      resetRouteForm();
+    } catch (routeError) {
+      setRouteFormError(
+        routeError instanceof Error ? routeError.message : "เกิดข้อผิดพลาดในการบันทึก Route"
+      );
+    } finally {
+      setIsSavingRoute(false);
+    }
+  }
+
+  async function handleConfirmDeleteRoute() {
+    if (!routeToDelete) return;
+
+    setIsDeletingRoute(true);
+    setRouteDeleteError("");
+    try {
+      const response = await fetch(`/api/routes/${routeToDelete._id}`, {
+        method: "DELETE",
+      });
+      const responsePayload = await readJson<{ message?: string }>(response);
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "ลบ Route ไม่สำเร็จ");
+      }
+
+      const routesReloaded = await loadRoutes();
+      if (!routesReloaded) {
+        throw new Error("ลบ Route แล้ว แต่โหลดรายการล่าสุดไม่สำเร็จ");
+      }
+      setRouteToDelete(null);
+      setRouteFormSuccess("ลบ Route สำเร็จ");
+    } catch (routeError) {
+      setRouteDeleteError(
+        routeError instanceof Error ? routeError.message : "เกิดข้อผิดพลาดในการลบ Route"
+      );
+    } finally {
+      setIsDeletingRoute(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#0C0C12] px-4 py-6 text-zinc-100 sm:px-8 sm:py-8">
@@ -1654,6 +1890,300 @@ async function handleCreateMonth(
                 icon={<Wallet size={20} />}
               />
             </section>
+
+            {/* Travel Routes */}
+            <section className="space-y-5 rounded-2xl border border-white/10 bg-[#13131B] p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-pink-400">TRAVEL ROUTES</p>
+                  <h3 className="mt-1 text-xl font-bold text-white">เส้นทางการเดินทาง</h3>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    จัดการเส้นทางไปและกลับหลายรายการได้ตามต้องการ
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateRouteForm}
+                  className="flex items-center gap-2 rounded-xl bg-pink-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-pink-400"
+                >
+                  <Plus size={16} />
+                  เพิ่ม Route
+                </button>
+              </div>
+
+              {routesError && (
+                <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+                  {routesError}
+                </p>
+              )}
+
+              {routeFormSuccess && !showRouteForm && (
+                <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+                  {routeFormSuccess}
+                </p>
+              )}
+
+              {routesLoading ? (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-zinc-400">
+                  กำลังโหลด Route...
+                </div>
+              ) : routes.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/15 p-8 text-center text-sm text-zinc-500">
+                  ยังไม่มี Route ในระบบ
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {(["OUTBOUND", "RETURN"] as const).map((type) => (
+                    <div key={type} className="space-y-3">
+                      <h4 className="text-sm font-semibold text-zinc-300">
+                        {type === "OUTBOUND" ? "ขาไป (OUTBOUND)" : "ขากลับ (RETURN)"}
+                      </h4>
+                      {routesByType[type].length === 0 ? (
+                        <p className="rounded-xl border border-white/[0.08] p-4 text-sm text-zinc-600">
+                          ยังไม่มี Route ประเภทนี้
+                        </p>
+                      ) : (
+                        routesByType[type].map((route) => (
+                          <article
+                            key={route._id}
+                            className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h5 className="font-semibold text-white">{route.name}</h5>
+                                <p className="mt-1 text-xs text-pink-300">{route.type}</p>
+                              </div>
+                              <p className="text-right text-sm font-semibold text-pink-300">
+                                {formatMoney(calculateRouteCost(route.segments))}
+                                <span className="block text-xs font-normal text-zinc-500">รวม</span>
+                              </p>
+                            </div>
+
+                            <div className="mt-4 space-y-2">
+                              {route.segments.map((segment, index) => (
+                                <div
+                                  key={segment._id ?? `${route._id}-${index}`}
+                                  className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-[#0C0C12] px-3 py-2 text-sm"
+                                >
+                                  <span className="min-w-0 truncate text-zinc-300">
+                                    {segment.name}
+                                  </span>
+                                  <span className="shrink-0 text-zinc-400">
+                                    {formatMoney(segment.cost)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-4 flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditRouteForm(route)}
+                                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                              >
+                                แก้ไข
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRouteDeleteError("");
+                                  setRouteToDelete(route);
+                                }}
+                                className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 transition hover:bg-red-500/10"
+                              >
+                                ลบ
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {showRouteForm && (
+                <form
+                  onSubmit={handleRouteSubmit}
+                  className="space-y-5 rounded-xl border border-pink-500/20 bg-[#15151D] p-4 sm:p-5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-pink-400">{editingRouteId ? "EDIT ROUTE" : "NEW ROUTE"}</p>
+                      <h4 className="mt-1 font-semibold text-white">
+                        {editingRouteId ? "แก้ไขเส้นทาง" : "สร้างเส้นทางใหม่"}
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRouteForm(false);
+                        setRouteFormError("");
+                      }}
+                      className="rounded-lg p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                      aria-label="ปิดฟอร์ม Route"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-2 text-sm text-zinc-300">
+                      ชื่อ Route
+                      <input
+                        type="text"
+                        value={routeForm.name}
+                        onChange={(event) =>
+                          setRouteForm((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
+                        }
+                        placeholder="เช่น บ้าน → ที่ทำงาน"
+                        className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-zinc-300">
+                      ประเภท Route
+                      <select
+                        value={routeForm.type}
+                        onChange={(event) =>
+                          setRouteForm((current) => ({
+                            ...current,
+                            type: event.target.value as TravelRoute["type"],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500"
+                      >
+                        <option value="OUTBOUND">OUTBOUND (ขาไป)</option>
+                        <option value="RETURN">RETURN (ขากลับ)</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h5 className="font-semibold text-white">Segments</h5>
+                        <p className="mt-1 text-xs text-zinc-500">ต้องมีอย่างน้อย 1 รายการ</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addRouteSegment}
+                        className="rounded-lg border border-pink-500/30 px-3 py-2 text-xs text-pink-300 transition hover:bg-pink-500/10"
+                      >
+                        เพิ่ม Segment
+                      </button>
+                    </div>
+
+                    {routeForm.segments.map((segment, index) => (
+                      <div key={index} className="grid gap-2 sm:grid-cols-[1fr_150px_auto]">
+                        <input
+                          type="text"
+                          value={segment.name}
+                          onChange={(event) => updateRouteSegment(index, "name", event.target.value)}
+                          placeholder="เช่น บ้าน → BTS"
+                          aria-label={`ชื่อ Segment ${index + 1}`}
+                          className="rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-sm text-white outline-none focus:border-pink-500"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={segment.cost}
+                          onChange={(event) => updateRouteSegment(index, "cost", event.target.value)}
+                          placeholder="200"
+                          aria-label={`ค่าใช้จ่าย Segment ${index + 1}`}
+                          className={numberInputClass}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeRouteSegment(index)}
+                          disabled={routeForm.segments.length <= 1}
+                          className="rounded-xl border border-white/10 px-3 py-3 text-zinc-400 transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-30"
+                          aria-label={`ลบ Segment ${index + 1}`}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {routeFormError && (
+                    <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+                      {routeFormError}
+                    </p>
+                  )}
+
+                  <div className="flex justify-end gap-2 border-t border-white/[0.07] pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setShowRouteForm(false)}
+                      disabled={isSavingRoute}
+                      className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:opacity-50"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingRoute}
+                      className="rounded-xl bg-pink-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSavingRoute ? "กำลังบันทึก..." : "บันทึก Route"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+
+            {routeToDelete && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget && !isDeletingRoute) {
+                    setRouteToDelete(null);
+                  }
+                }}
+              >
+                <section
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="delete-route-title"
+                  className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#15151D] p-6 shadow-2xl"
+                >
+                  <h3 id="delete-route-title" className="text-lg font-semibold text-white">
+                    ยืนยันการลบ Route
+                  </h3>
+                  <p className="mt-3 text-sm leading-6 text-zinc-300">
+                    ต้องการลบ Route <span className="font-semibold text-pink-300">{routeToDelete.name}</span> หรือไม่
+                  </p>
+                  {routeDeleteError && (
+                    <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+                      {routeDeleteError}
+                    </p>
+                  )}
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRouteToDelete(null)}
+                      disabled={isDeletingRoute}
+                      className="rounded-xl border border-white/10 px-4 py-3 text-sm text-zinc-300 transition hover:bg-white/[0.05] disabled:opacity-50"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmDeleteRoute}
+                      disabled={isDeletingRoute}
+                      className="rounded-xl bg-red-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDeletingRoute ? "กำลังลบ..." : "ลบ Route"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            )}
 
             {/* Calendar */}
             <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#13131B]">

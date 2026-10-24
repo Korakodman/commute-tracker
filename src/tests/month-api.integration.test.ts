@@ -3,6 +3,7 @@ import { beforeAll, afterAll, describe, expect, test, vi } from "vitest";
 
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
+import TravelRoute from "@/app/Models/TravelRoute";
 
 import {
   GET as getMonth,
@@ -14,8 +15,16 @@ import { GET as getHistory } from "@/app/api/months/history/route";
 import { POST as createMonth } from "@/app/api/months/route";
 import { POST as createTravelDay } from "@/app/api/travel-days/route";
 import { PATCH as updateTravelDay } from "@/app/api/travel-days/[id]/route";
+import {
+  GET as getRoutes,
+  POST as createRoute,
+} from "@/app/api/routes/route";
+import {
+  DELETE as deleteRoute,
+  PATCH as updateRoute,
+} from "@/app/api/routes/[id]/route";
 const TEST_DB_URL =
-  "mongodb://127.0.0.1:27017/commute-tracker-test";
+  "mongodb://127.0.0.1:27017/commute-tracker-test?replicaSet=rs0";
 
 let testMonth: InstanceType<typeof Month>;
 let settingsMonth: InstanceType<typeof Month>;
@@ -34,6 +43,7 @@ beforeAll(async () => {
   // เคลียร์ข้อมูลเก่าจาก test DB
   await TravelDay.deleteMany({});
   await Month.deleteMany({});
+  await TravelRoute.deleteMany({});
 
   // สร้าง Month สำหรับทดสอบ
   testMonth = await Month.create({
@@ -165,6 +175,7 @@ await Month.deleteMany({
 await TravelDay.deleteMany({ monthId: integrityMonth._id });
 await Month.deleteOne({ _id: integrityMonth._id });
 
+  await TravelRoute.deleteMany({ name: /^integration-route-/ });
   await mongoose.connection.close();
 });
 describe("Month API Integration", () => {
@@ -382,19 +393,18 @@ describe("Regenerate Month API Integration", () => {
       },
     ]);
 
-    await Month.updateOne(
-      { _id: regenerateMonth._id },
-      {
-        defaultDailyCost: 250,
-        workDays: [0],
-        offDates: ["2026-11-01"],
-      }
-    );
-
     const response = await regenerateDays(
       new Request(
         `http://localhost/api/months/${regenerateMonth._id}/regenerate-days`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            defaultDailyCost: 250,
+            workDays: [0],
+            offDates: ["2026-11-01"],
+          }),
+        }
       ),
       {
         params: Promise.resolve({ id: regenerateMonth._id.toString() }),
@@ -421,11 +431,19 @@ describe("Regenerate Month API Integration", () => {
     expect(savedDays.filter((day) => day.status === "WORK")).toHaveLength(4);
     expect(savedDays.reduce((total, day) => total + day.cost, 0)).toBe(1000);
 
+    const savedMonth = await Month.findById(regenerateMonth._id);
+    expect(savedMonth).toMatchObject({
+      defaultDailyCost: 250,
+      workDays: [0],
+      offDates: ["2026-11-01"],
+    });
+
     const offDate = savedDays.find((day) => day.date === "2026-11-01");
     expect(offDate).toMatchObject({ status: "OFF", cost: 0 });
   });
 
   test("ถ้า insert TravelDay ล้มเหลว ต้อง rollback และเก็บข้อมูลเดิมไว้", async () => {
+    const monthBefore = await Month.findById(regenerateMonth._id).lean();
     const daysBefore = await TravelDay.find({
       monthId: regenerateMonth._id,
     }).sort({ date: 1 });
@@ -437,7 +455,15 @@ describe("Regenerate Month API Integration", () => {
       const response = await regenerateDays(
         new Request(
           `http://localhost/api/months/${regenerateMonth._id}/regenerate-days`,
-          { method: "POST" }
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              defaultDailyCost: 999,
+              workDays: [1, 2, 3, 4, 5],
+              offDates: [],
+            }),
+          }
         ),
         {
           params: Promise.resolve({ id: regenerateMonth._id.toString() }),
@@ -456,6 +482,7 @@ describe("Regenerate Month API Integration", () => {
       expect(daysAfter.map((day) => day.cost)).toEqual(
         daysBefore.map((day) => day.cost)
       );
+      expect(await Month.findById(regenerateMonth._id).lean()).toEqual(monthBefore);
     } finally {
       insertManySpy.mockRestore();
     }
@@ -721,5 +748,178 @@ describe("Monthly History API Integration", () => {
 
     expect(monthAfter).toEqual(monthBefore);
     expect(daysAfter).toEqual(daysBefore);
+  });
+});
+
+describe("TravelRoute CRUD API Integration", () => {
+  let routeId = "";
+
+  const routePayload = {
+    name: "integration-route-main",
+    type: "OUTBOUND" as const,
+    segments: [
+      { name: "บ้าน → BTS", cost: 15 },
+      { name: "BTS → ที่ทำงาน", cost: 35 },
+    ],
+  };
+
+  test("GET เมื่อไม่มี Route ต้องคืน empty collection", async () => {
+    const response = await getRoutes();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.Routes).toEqual([]);
+  });
+
+  test("POST Route ที่ถูกต้องสำเร็จและบันทึกข้อมูลจริง", async () => {
+    const response = await createRoute(
+      new Request("http://localhost/api/routes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(routePayload),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    routeId = body.newTravelRoute._id;
+    expect(body.newTravelRoute).toMatchObject(routePayload);
+    expect(await TravelRoute.findById(routeId)).not.toBeNull();
+  });
+
+  test.each([
+    { type: "INVALID", segments: routePayload.segments },
+    { type: "OUTBOUND", segments: [{ name: "", cost: 10 }] },
+    { type: "OUTBOUND", segments: [{ name: "bus", cost: -1 }] },
+    { type: "OUTBOUND", segments: [{ name: "bus", cost: "10" }] },
+    { type: "OUTBOUND", segments: [{ name: "bus", cost: Number.NaN }] },
+  ])("POST ข้อมูลไม่ผ่าน validation ต้องคืน 400 และไม่สร้างข้อมูล", async (invalidData) => {
+    const before = await TravelRoute.countDocuments({
+      name: "integration-route-invalid",
+    });
+    const response = await createRoute(
+      new Request("http://localhost/api/routes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "integration-route-invalid",
+          ...invalidData,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(
+      await TravelRoute.countDocuments({ name: "integration-route-invalid" })
+    ).toBe(before);
+  });
+
+  test("POST malformed JSON ต้องคืน 400", async () => {
+    const response = await createRoute(
+      new Request("http://localhost/api/routes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{invalid",
+      })
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  test("GET ต้องคืน Route ที่บันทึกอยู่จริง", async () => {
+    const response = await getRoutes();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.Routes).toHaveLength(1);
+    expect(body.Routes[0]._id).toBe(routeId);
+  });
+
+  test("PATCH partial update ต้องรักษา field ที่ไม่ได้ส่งมา", async () => {
+    const response = await updateRoute(
+      new Request("http://localhost/api/routes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "integration-route-renamed" }),
+      }),
+      { params: Promise.resolve({ id: routeId }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.updateRoute).toMatchObject({
+      name: "integration-route-renamed",
+      type: routePayload.type,
+      segments: routePayload.segments,
+    });
+  });
+
+  test("PATCH malformed JSON, invalid ID และไม่พบข้อมูลต้องคืน error ที่ถูกต้อง", async () => {
+    const malformed = await updateRoute(
+      new Request("http://localhost/api/routes", {
+        method: "PATCH",
+        body: "{invalid",
+      }),
+      { params: Promise.resolve({ id: routeId }) }
+    );
+    const invalidId = await updateRoute(
+      new Request("http://localhost/api/routes", {
+        method: "PATCH",
+        body: JSON.stringify({ name: "changed" }),
+      }),
+      { params: Promise.resolve({ id: "not-an-object-id" }) }
+    );
+    const missing = await updateRoute(
+      new Request("http://localhost/api/routes", {
+        method: "PATCH",
+        body: JSON.stringify({ name: "changed" }),
+      }),
+      { params: Promise.resolve({ id: new mongoose.Types.ObjectId().toString() }) }
+    );
+
+    expect(malformed.status).toBe(400);
+    expect(invalidId.status).toBe(400);
+    expect(missing.status).toBe(404);
+    expect((await TravelRoute.findById(routeId))?.name).toBe(
+      "integration-route-renamed"
+    );
+  });
+
+  test("PATCH validation error ต้องไม่เปลี่ยนข้อมูลเดิม", async () => {
+    const before = await TravelRoute.findById(routeId).lean();
+    const response = await updateRoute(
+      new Request("http://localhost/api/routes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: [{ name: "bad", cost: -5 }] }),
+      }),
+      { params: Promise.resolve({ id: routeId }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await TravelRoute.findById(routeId).lean()).toEqual(before);
+  });
+
+  test("DELETE ต้องตรวจ ID, not found และลบข้อมูลจริง", async () => {
+    const invalid = await deleteRoute(new Request("http://localhost/api/routes"), {
+      params: Promise.resolve({ id: "invalid-id" }),
+    });
+    const missing = await deleteRoute(new Request("http://localhost/api/routes"), {
+      params: Promise.resolve({ id: new mongoose.Types.ObjectId().toString() }),
+    });
+    const deleted = await deleteRoute(new Request("http://localhost/api/routes"), {
+      params: Promise.resolve({ id: routeId }),
+    });
+
+    expect(invalid.status).toBe(400);
+    expect(missing.status).toBe(404);
+    expect(deleted.status).toBe(200);
+    expect(await TravelRoute.findById(routeId)).toBeNull();
+
+    const deletedAgain = await deleteRoute(
+      new Request("http://localhost/api/routes"),
+      { params: Promise.resolve({ id: routeId }) }
+    );
+    expect(deletedAgain.status).toBe(404);
   });
 });

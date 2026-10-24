@@ -3,37 +3,57 @@ import { NextResponse } from "next/server";
 import TravelRoute from "@/app/Models/TravelRoute";
 import { TravelRouteSchema } from "@/schemas/TravelRouteSchema";
 
-export async function POST(req:Request) {
-    await connectDB()
+export async function POST(req: Request) {
+  let body: unknown;
 
-   const body: unknown = await req.json()
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { message: "ข้อมูล JSON ไม่ถูกต้อง" },
+      { status: 400 }
+    );
+  }
 
-   const result = TravelRouteSchema.safeParse(body)
+  const result = TravelRouteSchema.safeParse(body);
 
-   if(!result.success){
-      return NextResponse.json(
-         {
-            message:"ข้อมูลไม่ถูกต้อง",
-            errors:result.error.flatten()
-         },
-         {status:400}
-      )
-   }
+  if (!result.success) {
+    return NextResponse.json(
+      {
+        message: "ข้อมูลไม่ถูกต้อง",
+        errors: result.error.flatten(),
+      },
+      { status: 400 }
+    );
+  }
 
-  const newTravelRoute = await TravelRoute.create(result.data)
+  try {
+    await connectDB();
+    const newTravelRoute = await TravelRoute.create(result.data);
 
-  
+    return NextResponse.json({ newTravelRoute }, { status: 200 });
+  } catch (error: unknown) {
+    console.error("Create TravelRoute failed:", error);
 
- return NextResponse.json({newTravelRoute},{status:200})
+    return NextResponse.json(
+      { message: "เกิดข้อผิดพลาดในการสร้าง Route" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function GET() {
-    await connectDB()
-    
-    const Routes = await TravelRoute.find()
+  try {
+    await connectDB();
+    const Routes = await TravelRoute.find().sort({ _id: 1 });
 
-   
+    return NextResponse.json({ Routes }, { status: 200 });
+  } catch (error: unknown) {
+    console.error("Get TravelRoutes failed:", error);
 
-    return NextResponse.json({Routes},{status:200})
-
+    return NextResponse.json(
+      { message: "เกิดข้อผิดพลาดในการโหลด Route" },
+      { status: 500 }
+    );
+  }
 }

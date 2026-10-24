@@ -22,11 +22,17 @@ const TravelSegmentSchema = new Schema<TravelSegment>({
     name:{
         type:String,
         required:true,
+        trim:true,
+        minlength:1,
     },
     cost:{
         type:Number,
         required:true,
         min:0,
+        validate:{
+            validator:(cost:number) => Number.isFinite(cost),
+            message:"cost ต้องเป็นตัวเลขที่ใช้งานได้"
+        }
     }
 })
 // สร้าง Schema ของ TravelRoute
@@ -34,6 +40,8 @@ const TravelRouteSchema = new Schema<TravelRoute>({
     name:{
     type:String,
     required:true,
+    trim:true,
+    minlength:1,
     },
     type:{
         type:String,
@@ -43,7 +51,11 @@ const TravelRouteSchema = new Schema<TravelRoute>({
     },
     segments:{
         type:[TravelSegmentSchema],
-        required:true
+        required:true,
+        validate:{
+            validator:(segments:TravelSegment[]) => segments.length > 0,
+            message:"อย่างน้อยต้องมี segment หนึ่งรายการ"
+        }
     }
 })
 
