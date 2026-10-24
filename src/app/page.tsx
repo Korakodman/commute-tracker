@@ -38,11 +38,10 @@ import CalendarSection, {
 import DayDetailPanel from "@/components/commute/DayDetailPanel";
 import CreateMonthForm from "@/components/commute/CreateMonthForm";
 import { useTravelRoutes } from "@/hooks/useTravelRoutes";
+import { useMonthlyHistory } from "@/hooks/useMonthlyHistory";
 import TravelRouteManager from "@/components/commute/TravelRouteManager";
 import type { TravelRoute, TravelRouteForm } from "@/lib/route-types";
-import MonthlyHistory, {
-  type MonthlyHistoryItem,
-} from "@/components/commute/MonthlyHistory";
+import MonthlyHistory from "@/components/commute/MonthlyHistory";
 interface MonthItem {
   _id: string;
   year: number;
@@ -133,10 +132,14 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<"dashboard" | "history">(
     "dashboard"
   );
-  const [history, setHistory] = useState<MonthlyHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState("");
   const [historyYear, setHistoryYear] = useState("all");
+
+  const {
+    history,
+    historyLoading,
+    historyError,
+    clearHistoryError,
+  } = useMonthlyHistory({ enabled: viewMode === "history" });
 
   const [monthsReloadKey, setMonthsReloadKey] = useState(0);
 
@@ -292,49 +295,7 @@ const [routeDeleteError, setRouteDeleteError] = useState("");
     };
   }, [selectedMonthId, reloadKey]);
 
-  useEffect(() => {
-    if (viewMode !== "history") return;
 
-    let active = true;
-
-    async function loadHistory() {
-      setHistoryLoading(true);
-      setHistoryError("");
-
-      try {
-        const response = await fetch("/api/months/history");
-        const payload = await readJson<{
-          history?: MonthlyHistoryItem[];
-          message?: string;
-        }>(response);
-
-        if (!response.ok || !payload?.history) {
-          throw new Error(
-            payload?.message ?? "โหลดประวัติรายเดือนไม่สำเร็จ"
-          );
-        }
-
-        if (active) setHistory(payload.history);
-      } catch (err) {
-        if (active) {
-          setHistory([]);
-          setHistoryError(
-            err instanceof Error
-              ? err.message
-              : "เกิดข้อผิดพลาดในการโหลดประวัติรายเดือน"
-          );
-        }
-      } finally {
-        if (active) setHistoryLoading(false);
-      }
-    }
-
-    loadHistory();
-
-    return () => {
-      active = false;
-    };
-  }, [viewMode]);
 
   // แปลงข้อมูล TravelDay เป็นช่องปฏิทิน
   const calendarCells = useMemo(() => {
@@ -1004,7 +965,7 @@ async function handleCreateMonth(
   <button
     type="button"
     onClick={() => {
-      setHistoryError("");
+      clearHistoryError();
       setViewMode("history");
     }}
     className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm transition ${
