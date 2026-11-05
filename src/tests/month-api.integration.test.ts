@@ -23,8 +23,10 @@ import {
   DELETE as deleteRoute,
   PATCH as updateRoute,
 } from "@/app/api/routes/[id]/route";
-const TEST_DB_URL =
-  "mongodb://127.0.0.1:27017/commute-tracker-test?replicaSet=rs0";
+import { validateTestDatabaseConfig } from "./test-db-safety";
+
+const testDatabaseConfig = validateTestDatabaseConfig();
+const TEST_DB_URL = testDatabaseConfig.url;
 
 let testMonth: InstanceType<typeof Month>;
 let settingsMonth: InstanceType<typeof Month>;
@@ -35,7 +37,7 @@ let historyOtherMonth: InstanceType<typeof Month>;
 let integrityMonth: InstanceType<typeof Month>;
 
 beforeAll(async () => {
-  // ให้ integration test ใช้ DB แยกจาก DB ที่เราใช้พัฒนา
+  // connectDB ใช้ MONGODB_URL อยู่ จึงส่งต่อเฉพาะ URL ที่ผ่าน Test Database Guard แล้ว
   process.env.MONGODB_URL = TEST_DB_URL;
 
   await mongoose.connect(TEST_DB_URL);
