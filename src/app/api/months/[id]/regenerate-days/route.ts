@@ -13,11 +13,15 @@ import { generateMonthDays } from "@/lib/calender";
 import { findInvalidOffDate } from "@/lib/month-validation";
 import { findValidatedRouteSelection } from "@/lib/route-selection";
 import { UpdateMonthSchema } from "@/schemas/MonthSchema";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(request);
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
 
   if (!mongoose.isValidObjectId(id)) {

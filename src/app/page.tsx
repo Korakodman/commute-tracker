@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   CalendarDays,
@@ -16,6 +17,7 @@ import {
   Plus,
   History,
   LayoutDashboard,
+  LogOut,
 } from "lucide-react";
 import {
   calculateSelectedRoutesCost,
@@ -42,6 +44,7 @@ import { useMonthlyHistory } from "@/hooks/useMonthlyHistory";
 import TravelRouteManager from "@/components/commute/TravelRouteManager";
 import type { TravelRoute, TravelRouteForm } from "@/lib/route-types";
 import MonthlyHistory from "@/components/commute/MonthlyHistory";
+import { authClient } from "@/lib/auth-client";
 interface MonthItem {
   _id: string;
   year: number;
@@ -114,6 +117,7 @@ const numberInputClass =
   "w-full rounded-xl border border-white/10 bg-[#0C0C12] px-3 py-3 text-white outline-none focus:border-pink-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 export default function Home() {
+  const router = useRouter();
   const [months, setMonths] = useState<MonthItem[]>([]);
   const [selectedMonthId, setSelectedMonthId] = useState("");
   const [selectedDay, setSelectedDay] = useState<TravelDay | null>(null);
@@ -133,6 +137,7 @@ export default function Home() {
     "dashboard"
   );
   const [historyYear, setHistoryYear] = useState("all");
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const {
     history,
@@ -140,6 +145,19 @@ export default function Home() {
     historyError,
     clearHistoryError,
   } = useMonthlyHistory({ enabled: viewMode === "history" });
+
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    const result = await authClient.signOut();
+
+    if (result.error) {
+      setIsLoggingOut(false);
+      setError("ออกจากระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+      return;
+    }
+
+    router.replace("/login");
+  }
 
   const [monthsReloadKey, setMonthsReloadKey] = useState(0);
 
@@ -976,6 +994,16 @@ async function handleCreateMonth(
   >
     <History size={16} />
     Monthly History
+  </button>
+
+  <button
+    type="button"
+    onClick={handleLogout}
+    disabled={isLoggingOut}
+    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+  >
+    <LogOut size={16} />
+    {isLoggingOut ? "กำลังออกจากระบบ..." : "ออกจากระบบ"}
   </button>
 
   {viewMode === "dashboard" && (

@@ -4,8 +4,12 @@ import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
 import { calculateMonthlyCost } from "@/lib/calculations";
 import { connectDB } from "@/lib/db";
+import { requireAuth } from "@/lib/auth-guard";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   try {
     await connectDB();
 

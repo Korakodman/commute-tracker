@@ -4,6 +4,7 @@ import TravelDay from "@/app/Models/TravelDay";
 import { TravelDaySchema } from "@/schemas/TravelDaySchema";
 import { NextResponse } from "next/server";
 import Month from "@/app/Models/Month";
+import { requireAuth } from "@/lib/auth-guard";
 
  function isValidDateString(date: string) {
   const [year, month, day] = date.split("-").map(Number);
@@ -19,6 +20,9 @@ import Month from "@/app/Models/Month";
    
 
 export async function POST(req: Request) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   await connectDB();
 
   const body: unknown = await req.json();
@@ -125,6 +129,9 @@ if (!isValidDateString(date)) {
 }
 
 export async function GET(req:Request) {
+    const unauthorized = await requireAuth(req);
+    if (unauthorized) return unauthorized;
+
     await connectDB()
 
      // อ่าน query parameter จาก URL

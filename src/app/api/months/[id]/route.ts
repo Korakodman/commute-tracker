@@ -9,8 +9,12 @@ import { UpdateMonthSchema } from "@/schemas/MonthSchema";
 import { calculateMonthlyCost } from "@/lib/calculations";
 import { isDateInMonth, isValidDateString } from "@/lib/month-validation";
 import { findValidatedRouteSelection } from "@/lib/route-selection";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function GET(req:Request,{params}:{params : Promise<{id:string}>}) {
+    const unauthorized = await requireAuth(req);
+    if (unauthorized) return unauthorized;
+
     await connectDB()
 
     const {id} = await params
@@ -55,6 +59,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   await connectDB();
 
   const { id } = await params;

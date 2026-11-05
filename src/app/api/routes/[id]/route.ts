@@ -4,6 +4,7 @@ import TravelRoute from "@/app/Models/TravelRoute";
 import Month from "@/app/Models/Month";
 import { TravelRouteSchema } from "@/schemas/TravelRouteSchema";
 import mongoose from "mongoose";
+import { requireAuth } from "@/lib/auth-guard";
 
 const UpdateTravelRouteSchema = TravelRouteSchema.partial();
 
@@ -11,6 +12,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
 
   if (!mongoose.isValidObjectId(id)) {
@@ -73,6 +77,9 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(_req);
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
 
   if (!mongoose.isValidObjectId(id)) {

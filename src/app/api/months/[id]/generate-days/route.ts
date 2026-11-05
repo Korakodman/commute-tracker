@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
 import { generateMonthDays } from "@/lib/calender";
+import { requireAuth } from "@/lib/auth-guard";
 
 function isValidDateString(date: string) {
   const [year, month, day] = date.split("-").map(Number);
@@ -21,9 +22,12 @@ function isValidDateString(date: string) {
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   await connectDB();
 
   // 1. ตรวจสอบ Month ID

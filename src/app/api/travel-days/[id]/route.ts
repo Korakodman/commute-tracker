@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import TravelDay from "@/app/Models/TravelDay";
 import Month from "@/app/Models/Month";
 import { TravelDaySchema } from "@/schemas/TravelDaySchema";
+import { requireAuth } from "@/lib/auth-guard";
 
 const UpdateTravelDaySchema = TravelDaySchema.partial();
 
@@ -26,6 +27,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   await connectDB();
 
   const { id } = await params;
@@ -175,6 +179,8 @@ export async function PATCH(
   }
 }
 export async function DELETE(req:Request,{params}:{params: Promise<{id:string}>}) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
       
    await connectDB()
 

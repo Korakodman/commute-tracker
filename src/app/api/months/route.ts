@@ -4,9 +4,13 @@ import Month from "@/app/Models/Month";
 import { connectDB } from "@/lib/db";
 import { findInvalidOffDate } from "@/lib/month-validation";
 import { findValidatedRouteSelection } from "@/lib/route-selection";
+import { requireAuth } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(req: Request) {
+    const unauthorized = await requireAuth(req);
+    if (unauthorized) return unauthorized;
+
     await connectDB()
 
   const MonthAll = await Month.find()
@@ -16,6 +20,9 @@ export async function GET() {
 }
 
 export async function POST(req:Request) {
+    const unauthorized = await requireAuth(req);
+    if (unauthorized) return unauthorized;
+
     await connectDB()
 
     let body: unknown;

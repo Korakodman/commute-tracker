@@ -1,6 +1,10 @@
 import mongoose from "mongoose";
 import { beforeAll, afterAll, describe, expect, test, vi } from "vitest";
 
+vi.mock("@/lib/auth-guard", () => ({
+  requireAuth: vi.fn().mockResolvedValue(null),
+}));
+
 import Month from "@/app/Models/Month";
 import TravelDay from "@/app/Models/TravelDay";
 import TravelRoute from "@/app/Models/TravelRoute";
@@ -665,7 +669,9 @@ describe("Month offDates validation integration", () => {
 
 describe("Monthly History API Integration", () => {
   test("ควรคืนข้อมูลหลายเดือนเรียงจากใหม่ไปเก่า พร้อม summary ที่แยกตามเดือน", async () => {
-    const response = await getHistory();
+    const response = await getHistory(
+      new Request("http://localhost/api/months/history")
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -737,7 +743,9 @@ describe("Monthly History API Integration", () => {
       .sort({ date: 1 })
       .lean();
 
-    const response = await getHistory();
+    const response = await getHistory(
+      new Request("http://localhost/api/months/history")
+    );
 
     expect(response.status).toBe(200);
 
@@ -766,7 +774,9 @@ describe("TravelRoute CRUD API Integration", () => {
   };
 
   test("GET เมื่อไม่มี Route ต้องคืน empty collection", async () => {
-    const response = await getRoutes();
+    const response = await getRoutes(
+      new Request("http://localhost/api/routes")
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -829,7 +839,9 @@ describe("TravelRoute CRUD API Integration", () => {
   });
 
   test("GET ต้องคืน Route ที่บันทึกอยู่จริง", async () => {
-    const response = await getRoutes();
+    const response = await getRoutes(
+      new Request("http://localhost/api/routes")
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
